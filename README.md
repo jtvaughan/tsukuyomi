@@ -17,26 +17,7 @@ If you can run Python commands on a terminal, then you can use 月詠.
 in [Shinto](http://en.wikipedia.org/wiki/Shinto) mythology.
 
 
-Contents
---------
 
-* [Introduction](#Introduction)
-  + [Guiding Principles](#GuidingPrinciples)
-  + [Why 月詠 Was Written](#WhyTsukuyomi)
-* [Requirements](#Requirements)
-* [Running 月詠](#Running)
-* [File Formats](#FileFormats)
-  + [Configuration Files](#ConfigurationFileFormat)
-  + [Log Files](#LogFileFormat)
-* [Server Configuration Files](#ServerConfigurationFiles)
-* [Other Files](#OtherFiles)
-  + [言葉 Flashcards](#言葉Flashcards)
-* [Repository Layout](#RepositoryLayout)
-* [Authors](#Authors)
-* [Licenses](#Licenses)
-
-
-<a id="Introduction" />
 Introduction
 ------------
 
@@ -47,7 +28,7 @@ As mentioned above, 月詠 is designed to be useful but not necessarily
 easy to use for average computer users.  However, anyone who can
 run Python commands from terminals can use 月詠.
 
-<a id="GuidingPrinciples" />
+
 ### Guiding Principles
 
 A few principles guide 月詠:
@@ -95,7 +76,7 @@ In keeping with these principles, 月詠 features the following:
    This means that the files are not copyrighted: You can download,
    distribute, modify, and use them any way you like.
 
-<a id="WhyTsukuyomi" />
+
 ### Why 月詠 Was Written
 
 Why did I, the author, write 月詠 even though there are other learning
@@ -118,7 +99,7 @@ tools available, such as [Anki](http://ankisrs.net/) and
    write decent software.
 
 
-<a id="Requirements" />
+
 Requirements
 ------------
 
@@ -141,7 +122,7 @@ If the following text is rendered as a single line with a ton of
 parentheses (that is, the furigana does not render properly), then you
 will need to use another web browser:
 
-> #<ruby>日<rp>(</rp><rt>に</rt><rp>)</rp></ruby><ruby>本<rp>(</rp><rt>ほん</rt><rp>)</rp></ruby><ruby>語<rp>(</rp><rt>ご</rt><rp>)</rp></ruby>を<ruby>勉<rp>(</rp><rt>べん</rt><rp>)</rp></ruby><ruby>強<rp>(</rp><rt>きょう</rt><rp>)</rp></ruby>しましょう！</ruby>
+> # <ruby>日<rp>(</rp><rt>に</rt><rp>)</rp></ruby><ruby>本<rp>(</rp><rt>ほん</rt><rp>)</rp></ruby><ruby>語<rp>(</rp><rt>ご</rt><rp>)</rp></ruby>を<ruby>勉<rp>(</rp><rt>べん</rt><rp>)</rp></ruby><ruby>強<rp>(</rp><rt>きょう</rt><rp>)</rp></ruby>しましょう！</ruby>
 
 Consider using [Google's Chrome browser](https://www.google.com/chrome),
 which natively supports furigana.
@@ -154,7 +135,7 @@ do not have such a font or it is not your browser's default
 [sans-serif font](http://en.wikipedia.org/wiki/Serif).
 
 
-<a id="Running" />
+
 Running 月詠
 -----------
 
@@ -183,14 +164,14 @@ Running 月詠
    aforementioned command.
 
 
-<a id="FileFormats" />
+
 File Formats
 ------------
 
 月詠 uses two kinds of files: [configuration files](#ConfigurationFileFormat)
 and [log files](#LogFileFormat).
 
-<a id="ConfigurationFileFormat" />
+
 ### Configuration Files
 
 _Configuration files_ are structured UTF-8 text files that represent data
@@ -277,7 +258,7 @@ There are a few things to note about configuration files:
 7. Whitespace, including line breaks, is captured in `TEXT` terminals but
    is ignored everywhere else.
 
-<a id="LogFileFormat" />
+
 ### Log Files
 
 _Log files_ are semi-structured UTF-8 text files that represent data
@@ -345,7 +326,7 @@ terminals.  However, whitespace is ignored everywhere else _except_
 at the end of records, where `NEWLINE`s terminate records.
 
 
-<a id="ServerConfigurationFiles" />
+
 Server Configuration Files
 --------------------------
 
@@ -365,11 +346,11 @@ Here is a sample configuration file:
     }
 
 
-<a id="OtherFiles" />
+
 Other Files
 -----------
 
-<a id="言葉Flashcards" />
+
 ### 言葉 Flashcards
 
 _言葉 flashcards_ are simple three-sided flashcards containing:
@@ -451,7 +432,7 @@ are treated as part of the regular flow of text.
 2. Furigana annotations do not work within furigana annotations.
 
 
-<a id="RepositoryLayout" />
+
 Repository Layout
 -----------------
 
@@ -460,7 +441,7 @@ Aside from its underlying [web framework], 月詠 is a single Python file,
 horizontal rules.
 
 
-<a id="Authors" />
+
 Authors
 -------
 
@@ -470,7 +451,7 @@ so that others may use it.  Of course, I welcome suggestions
 and contributions. (^_^)
 
 
-<a id="Licenses" />
+
 Licenses
 --------
 
