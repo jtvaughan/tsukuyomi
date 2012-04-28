@@ -43,7 +43,7 @@ A few principles guide 月詠:
    easy to parse and migrate to other applications.
 3. _Clarity_: Code and UIs should be thoroughly documented.
 4. _Freedom_: Open-source software should be truly open.  Anyone and any
-   thing should be able to download, distribute, modify, use it freely
+   thing should be able to download, distribute, modify, and use it freely
    (as in
    ["free speech" _and_ "free beer"](http://en.wikipedia.org/wiki/Gratis_versus_libre)).
 
@@ -338,6 +338,9 @@ attributes:
 1. _kotoba-flashcards-file_: If present, this attribute specifies
    the path to a configuration file containing
    [言葉 flashcards](#言葉Flashcards).
+
+All paths in the configuration file are either absolute or relative to
+the directory containing the configuration file.
 
 Here is a sample configuration file:
 
