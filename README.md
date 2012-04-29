@@ -350,7 +350,7 @@ the directory containing the configuration file.
 Here is a sample configuration file:
 
 >     "server-configuration" {
-      "kotoba-flashcards-file" { "/日記/日本/日本語/言葉のフラッシュカード.txt" }
+        "kotoba-flashcards-file" { "/日記/日本/日本語/言葉のフラッシュカード.txt" }
     }
 
 
@@ -397,13 +397,13 @@ A 言葉 flashcard is constructed as follows:
 For example, the 言葉 flashcard file
 
 >     "言葉のフラッシュカード" {
-      "Japanese class" {
-        "私はジョーダンヴァンです。よろしくお願いします。" { "I am Joodan Van.  Nice to meet you. (丁寧語)" }
+        "Japanese class" {
+          "私はジョーダンヴァンです。よろしくお願いします。" { "I am Joodan Van.  Nice to meet you. (丁寧語)" }
         "オーストラリア人です。" { "[The subject is] Australian." }
-      }
-      "もとひろさん" {
-        "お手洗いはどこですか。" { "Where is the bathroom? (polite)" }
-      }
+        }
+        "もとひろさん" {
+          "お手洗いはどこですか。" { "Where is the bathroom? (polite)" }
+        }
     }
 
 defines three 言葉 flashcards:

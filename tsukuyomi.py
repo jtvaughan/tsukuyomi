@@ -843,24 +843,17 @@ class T言葉と振り仮名Producer(object):
 
       will produce five T言葉と振り仮名 objects:
 
-        1. 言葉：きょう　振り仮名：<Nothing>
-        2. 言葉：漢字　　振り仮名：かんじ
-        3. 言葉：を　　　振り仮名：<Nothing>
-        4. 言葉：勉強　　振り仮名：<Nothing>
-        5. 言葉：する　　振り仮名：<Nothing>
+        1. 言葉：きょう　　　　　振り仮名：<Nothing>
+        2. 言葉：漢字　　　　　振り仮名：かんじ
+        3. 言葉：を勉強する。　　振り仮名：<Nothing>
 
       However,
 
         きょう(きょう)漢字を勉強する。
 
-      will produce the following five T言葉と振り仮名 objects:
+      will produce just one T言葉と振り仮名 object:
 
-        1. 言葉：きょう(きょう)  振り仮名：<Nothing>
-        2. 言葉：漢字　　　　　　振り仮名：<Nothing>
-        3. 言葉：を　　　　　　　振り仮名：<Nothing>
-        4. 言葉：勉強　　　　　　振り仮名：<Nothing>
-        5. 言葉：する　　　　　　振り仮名：<Nothing>"""
-
+        1. 言葉：きょう(きょう)漢字を勉強する。　　 振り仮名：<Nothing>"""
 
   def __init__(self, 振り仮名start, 振り仮名end):
     """ Construct a new parser using the specified 振り仮名 delimiter characters.
@@ -874,20 +867,28 @@ class T言葉と振り仮名Producer(object):
     self.__buffer_start = self.__buffer.tell()
     super().__init__()
 
+  def __AddResult(self, 言葉, 振り仮名):
+    """ Create a new T言葉と振り仮名 object with the specified 言葉 and 振り仮名 and add it to the Results.
+        If 振り仮名 is empty, then the new object will be coalesced with the
+        last T言葉と振り仮名 if it, too, has empty 振り仮名."""
+    if self.__results and not 振り仮名 and not self.__results[-1].振り仮名:
+      言葉 = self.__results.pop().言葉 + 言葉
+    self.__results.append(T言葉と振り仮名(言葉, 振り仮名))
+
   def Finish(self):
     """ Tell the parser that parsing is complete.  You should invoke this
         before accessing the parser's results."""
     if self.__漢字:
       if self.__振り仮名:
-        self.Results.append(T言葉と振り仮名(self.__temp漢字, self.__buffer.getvalue()))
+        self.__AddResult(self.__temp漢字, self.__buffer.getvalue())
         self.__振り仮名 = False
         self.__temp漢字 = None
       else:
-        self.Results.append(T言葉と振り仮名(self.__buffer.getvalue(), ""))
+        self.__AddResult(self.__buffer.getvalue(), "")
       self.__ResetBuffer()
       self.__漢字 = False
     elif not self.__BufferIsEmpty:
-      self.Results.append(T言葉と振り仮名(self.__buffer.getvalue(), ""))
+      self.__AddResult(self.__buffer.getvalue(), "")
       self.__ResetBuffer()
 
   def Process(self, text):
@@ -901,7 +902,7 @@ class T言葉と振り仮名Producer(object):
         if not self.__漢字:
           self.__漢字 = True
           if not self.__BufferIsEmpty:
-            self.Results.append(T言葉と振り仮名(self.__buffer.getvalue(), ""))
+            self.__AddResult(self.__buffer.getvalue(), "")
             self.__ResetBuffer()
         self.__buffer.write(char)
       else:
@@ -911,7 +912,7 @@ class T言葉と振り仮名Producer(object):
         else:
           if self.__振り仮名:
             if char == self.__振り仮名end:
-              self.Results.append(T言葉と振り仮名(self.__temp漢字, self.__buffer.getvalue()))
+              self.__AddResult(self.__temp漢字, self.__buffer.getvalue())
               self.__ResetBuffer()
               self.__漢字 = False
               self.__振り仮名 = False
@@ -925,7 +926,7 @@ class T言葉と振り仮名Producer(object):
               self.__ResetBuffer()
             else:
               self.__漢字 = False
-              self.Results.append(T言葉と振り仮名(self.__buffer.getvalue(), ""))
+              self.__AddResult(self.__buffer.getvalue(), "")
               self.__ResetBuffer()
               self.__buffer.write(char)
 
@@ -977,7 +978,16 @@ def GenerateHTML5Ruby(言葉と振り仮名sequence, buf, kanji_class,
       buf.write(ペア.振り仮名)
       buf.write(rt_end)
     else:
-      buf.write(ペア.言葉)
+      for 字 in ペア.言葉:
+        if ord(字) in KANJI_RANGE:
+          buf.write(
+            '<span class=\"' + kanji_class +
+            '" onclick="' + kanji_onclick_generator(字) +
+            ('" onmouseover="' + kanji_onmouseover_generator(字) + '">' if kanji_onmouseover_generator is not None else '">') +
+            字 + '</span>'
+           )
+        else:
+          buf.write(字)
 
 
 
