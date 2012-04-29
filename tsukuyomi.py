@@ -38,6 +38,19 @@ from bottle import *
 
 
 ################################################################################
+# Miscellaneous Functions
+################################################################################
+
+def EnsureAbsolutePath(path, base):
+  """ Convert a path into an absolute path if it is not one already.
+      If 'path' is absolute, then this function returns it untouched;
+      otherwise, it joins it to 'base'.  'base' must be an absolute path."""
+  assert os.path.isabs(base)
+  return path if os.path.isabs(path) else os.path.join(base, path)
+
+
+
+################################################################################
 # Useful, General-Purpose Data Structures
 ################################################################################
 
@@ -211,6 +224,16 @@ class TSection(object):
     return bool(self.__sections)
 
   @property
+  def HasSettings(self):
+    """True if this section has settings, False otherwise"""
+    return bool(self.__settings)
+
+  @property
+  def IsAttribute(self):
+    """True if this section is an attribute (it has one setting and no associated sections), False otherwise"""
+    return len(self.Settings) == 1 and not self.HasSections
+
+  @property
   def Name(self):
     """this section's name string"""
     return self.__name
@@ -219,6 +242,12 @@ class TSection(object):
   def Settings(self):
     """a list of this section's settings (in order)"""
     return self.__settings
+
+  @property
+  def Value(self):
+    """the value of this attribute (this section must be an attribute)"""
+    assert self.IsAttribute
+    return self.__settings[0]
 
 class TConfigurationFormatError(Exception):
 
@@ -1577,22 +1606,71 @@ def HandlePost():
 def Main():
   global FlashcardsFile
 
-  parser = argparse.ArgumentParser(description="言葉の試験サーバです。")
+  parser = argparse.ArgumentParser(description="月詠は日本語を勉強するツールです。")
   parser.add_argument(
-    "flashcardfile",
-    help="サーバのフラッシュカードのファイル"
+    "ポート番号",
+    help="サーバのポート番号です。"
+   )
+  parser.add_argument(
+    "サーバの設定ファイル",
+    help="path to the file containing the server's settings"
    )
 
   args = parser.parse_args(sys.argv[1:])
-  if not os.path.isfile(args.flashcardfile):
-    sys.stderr.write(args.flashcardfile + " is not a file")
+  try:
+    ポート番号 = int(args.ポート番号)
+  except ValueError:
+    sys.stderr.write("すみません、サーバのポート番号は駄目です。外のポート番号を使って下さい。\n")
     sys.exit(2)
-  if not os.access(args.flashcardfile, os.R_OK):
-    sys.stderr.write(args.flashcardfile + " is not readable")
-    sys.exit(2)
-  FlashcardsFile = args.flashcardfile
 
-  run(host='localhost', port=8080, debug=True)
+  # Ensure that the provided server configuration file is a readable file.
+  if not os.path.isfile(args.サーバの設定ファイル):
+    sys.stderr.write("すみません、" + args.サーバの設定ファイル + "はファイルじゃありません。外のパス名を使って下さい。\n")
+    sys.exit(2)
+  if not os.access(args.サーバの設定ファイル, os.R_OK):
+    sys.stderr.write("すみません、" + args.サーバの設定ファイル + "を開けて読めません。\n")
+    sys.exit(2)
+
+  # Parse the configuration file.
+  parser = TConfigurationDOMParser()
+  try:
+    with open(args.サーバの設定ファイル, "r") as f:
+      parser.ParseStrings(f)
+    parser.Finish()
+  except TConfigurationFormatError as e:
+    sys.stderr.write("すみません、その設定ファイルは駄目です。\n")
+    sys.stderr.write(str(e) + "\n")
+    sys.exit(2)
+  except Exception as e:
+    sys.stderr.write("Unexpected error: " + str(e) + "\n")
+    sys.exit(2)
+  args.サーバの設定ファイル = os.path.abspath(os.path.dirname(args.サーバの設定ファイル))
+
+  # Extract server settings from the configuration file.
+  # Check for errors.
+  def PrintErrorAndExit(message):
+    sys.stderr.write("すみません、その設定ファイルは駄目です。" + message + "\n")
+    sys.exit(2)
+  if parser.Root.Name != "server-configuration":
+    PrintErrorAndExit("The root's name should be 'server-configuration'.")
+  if parser.Root.HasSettings:
+    PrintErrorAndExit("The root node cannot have settings.")
+  for section in parser.Root.YieldSections():
+    if not section.IsAttribute:
+      PrintErrorAndExit("Settings must be attributes.")
+    if section.Name == "kotoba-flashcards-file":
+      if FlashcardsFile is not None:
+        PrintErrorAndExit("It has two 'kotoba-flashcards-file' attributes.")
+      FlashcardsFile = EnsureAbsolutePath(section.Value, args.サーバの設定ファイル)
+      if not os.path.isfile(FlashcardsFile):
+        PrintErrorAndExit("The kotoba-flashcards-file '" + FlashcardsFile + "' is not a file.")
+      if not os.access(args.サーバの設定ファイル, os.R_OK):
+        PrintErrorAndExit("The kotoba-flashcards-file '" + FlashcardsFile + "' cannot be read.")
+    else:
+      PrintErrorAndExit("One setting has an invalid name: " + section.Name)
+
+  # Start the server.
+  run(host='localhost', port=ポート番号, debug=True)
 
 # TODO Download kanji stroke order diagrams automatically or via a separate program.
 #      Don't rely on external sources for every image.

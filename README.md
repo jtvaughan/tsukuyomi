@@ -154,8 +154,15 @@ Running 月詠
    1. `[port]` is the port number that the 月詠 server will use; and
    2. `[config-file]` is the path to a configuration file describing
       the server's other properties.
-      (See [the Configuration Files section](#ConfigurationFiles) for
-      more information.)
+      (See the Configuration Files section below for more information.)
+
+   You should see something like this on your terminal:
+
+         Bottle v0.11.dev server starting up (using WSGIRefServer())...
+         Listening on http://localhost:8080/
+         Hit Ctrl-C to quit.
+
+   In this example, `port` is 8080.
 
 5. Open a web browser.
 
@@ -168,8 +175,7 @@ Running 月詠
 File Formats
 ------------
 
-月詠 uses two kinds of files: [configuration files](#ConfigurationFileFormat)
-and [log files](#LogFileFormat).
+月詠 uses two kinds of files: configuration files and log files.
 
 
 ### Configuration Files
@@ -332,19 +338,18 @@ Server Configuration Files
 
 月詠 expects the user to provide a special configuration file
 describing the server's properties.  The configuration file's root
-must be named "configuration" and can contain any of the following
+must be named "server-configuration" and can contain any of the following
 attributes:
 
 1. _kotoba-flashcards-file_: If present, this attribute specifies
-   the path to a configuration file containing
-   [言葉 flashcards](#言葉Flashcards).
+   the path to a configuration file containing 言葉 flashcards (see below).
 
 All paths in the configuration file are either absolute or relative to
 the directory containing the configuration file.
 
 Here is a sample configuration file:
 
->     "configuration" {
+>     "server-configuration" {
       "kotoba-flashcards-file" { "/日記/日本/日本語/言葉のフラッシュカード.txt" }
     }
 
@@ -369,8 +374,7 @@ sides.  However, the algorithms and UI associated with these flashcards
 are written to interpret the sides as described above.  (NOTE: 英語 does
 not have to be written in English.)
 
-言葉 flashcards are stored within
-[configuration files](#ConfigurationFileFormat).  Each file must
+言葉 flashcards are stored within configuration files.  Each file must
 follow these rules:
 
 1. The root must be named "言葉のフラッシュカード".
