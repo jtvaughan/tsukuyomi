@@ -63,7 +63,7 @@ In keeping with these principles, 月詠 features the following:
    [HTML5](http://en.wikipedia.org/wiki/HTML5),
    [CSS](http://en.wikipedia.org/wiki/CSS), and
    [Javascript](http://en.wikipedia.org/wiki/Javascript).
-   ([HTML 5's ruby tag](http://www.w3schools.com/html5/tag_ruby.asp) is
+   ([HTML5's ruby tag](http://www.w3schools.com/html5/tag_ruby.asp) is
    especially handy.)
 3. All 月詠 modules are thoroughly documented.  Undocumented functions
    and out-of-date documentation are treated as bugs.
@@ -87,14 +87,14 @@ tools available, such as [Anki](http://ankisrs.net/) and
    I used Anki and Mnemosyne for a while but thought both were too
    complex.  Both were designed to appeal to large, diverse audiences:
    All I needed was a tool or two that I could use to learn Japanese.
-   Also, I despise using [SQLite](http://www.sqlite.org/) to
+2. I despise using [SQLite](http://www.sqlite.org/) to
    store and retrieve flashcards.  I wanted to be able to easily edit my
    flashcards files with a text editor.
-2. I want finer control over the way statistics are generated
+3. I want finer control over the way statistics are generated
    and displayed.
-3. I want to write several different kinds of tools to aid my
+4. I want to write several different kinds of tools to aid my
    language studies, not just flashcards.
-4. I like writing my own software.  I understand exactly how the software
+5. I like writing my own software.  I understand exactly how the software
    works and I can tailor it to fit my needs.  Besides, I think I can
    write decent software.
 
@@ -112,8 +112,8 @@ other than CPython, the standard interpreter.
 For those of you who are still stuck in Python 2.x land: Get over it.
 Python 3 is the present and the future.
 
-月詠 serves HTML 5 web pages, so you will need to use a web browser that
-supports HTML 5.  In particular, the browser should render
+月詠 serves HTML5 web pages, so you will need to use a web browser that
+supports HTML5.  In particular, the browser should render
 ruby-annotated text properly, or else Japanese text with
 [furigana](http://en.wikipedia.org/wiki/Furigana) will be difficult
 to read.
@@ -228,7 +228,7 @@ But
 is not a valid `TEXT` terminal because there are unescaped `DOUBLE-QUOTE`s
 within the string.
 
-Configuration files may also contain comments.  A comment begins with
+Configuration files may contain comments.  A comment begins with
 `@` or `#` and proceeds to the end of the line (that is, up to and
 including the next newline [`\n`] in the file).  Comments cannot occur
 within `TEXT` terminals.  Comments are ignored by 月詠, so they can
@@ -276,7 +276,7 @@ Here is a simplified [grammar](http://en.wikipedia.org/wiki/Context-free_grammar
 describing log files (`log-file` is the
 [start symbol](http://en.wikipedia.org/wiki/Context-free_grammar#Formal_definitions)):
 
->     log-file = records
+>     log-file = record-list
 
 >     record-list = EMPTY | NEWLINE record-list | record record-list
 
@@ -315,7 +315,7 @@ But
 is not a valid `TEXT` terminal because there are unescaped
 `DOUBLE-QUOTE`s within the string.
 
-Log files may also contain comments.  A comment begins with
+Log files may contain comments.  A comment begins with
 `@` or `#` and proceeds to the end of the line (that is, up to and
 including the next `NEWLINE` in the file).  Comments cannot occur
 within `TEXT` terminals.  Comments are ignored by 月詠, so they can
@@ -424,7 +424,7 @@ parentheses will be rendered as the kanji characters'
 
 > ## 今日(きょう)レストランに行って、友(とも)達(だち)と食(しょく)事(じ)をして、たくさんお酒を飲みました。(Note that this text isn't furigana even though it's inside matching parentheses.)今晩家へ(This isn't furigana, either.)帰(かえ)ります。酒(酒(さけ))
 
-Is equivalent to this furigana-annotated text:
+produces this furigana-annotated text:
 
 > ## <ruby>今日<rt>きょう</rt></ruby>レストランに行って、<ruby>友<rt>とも</rt></ruby><ruby>達<rt>だち</rt></ruby>と<ruby>食<rt>しょく</rt></ruby><ruby>事<rt>じ</rt></ruby>をして、たくさんお酒を飲みました。(Note that this text isn't furigana even though it's inside matching parentheses.)今晩家へ(This isn't furigana, either.)<ruby>帰<rt>かえ</rt></ruby>ります。<ruby>酒<rt>酒(さけ)</rt></ruby>
 

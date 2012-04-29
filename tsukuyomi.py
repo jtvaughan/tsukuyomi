@@ -147,45 +147,77 @@ class TRandomSelector(object):
 ################################################################################
 
 class TSection(object):
+  """ Instances of this class represent sections within configuration files.
+      As explained in README.md, configuration file sections are like inner
+      nodes within N-ary trees.  Each section may contain settings (strings)
+      or associated (child) sections.  The only restriction is that a section's
+      associated sections cannot not share the same name."""
 
   def __init__(self, name):
+    """ Construct an empty TSection with the specified name string."""
     self.__name = name
+    self.__children = []      # settings and sections in order
     self.__sections = collections.OrderedDict()
     self.__settings = []
     super().__init__()
 
   def AddSection(self, section):
+    """ Associate the specified TSection with this section.  This raises
+        KeyError if there is already an associated section with the specified
+        TSection's name."""
     assert isinstance(section, TSection)
     assert section is not self
     if self.__sections.setdefault(section.Name, section) is not section:
       raise KeyError("duplicate section name: " + section.Name)
+    self.__children.append(section)
 
   def AddSetting(self, setting):
+    """Append the specified setting string to this section."""
     self.__settings.append(setting)
+    self.__children.append(setting)
 
   def GetSection(self, name):
+    """ Get the associated section with the specified name.  This raises
+        KeyError if there is no such associated section."""
     return self.__sections[name]
 
   def HasSection(self, name):
+    """ Determine whether there is an associated section with the specified name."""
     return name in self.__sections
 
-  def HasSections(self):
-    return bool(self.__sections)
-
   def YieldSections(self):
+    """Get a generator that yields all of this section's sections in order."""
     for name in reversed(self.__sections):
       yield self.__sections[name]
 
   def YieldSectionsReversed(self):
+    """Get a generator that yields all of this section's sections in reverse order."""
     for section in self.__sections.values():
       yield section
 
   @property
+  def Children(self):
+    """a list of the section's settings and associated sections (read-only)"""
+    return self.__children
+
+  @property
+  def HasChildren(self):
+    """True if this section has settings or associated sections, False otherwise"""
+    return bool(self.__children)
+
+  @property
+  def HasSections(self):
+    """True if this section has associated sections, False otherwise"""
+    return bool(self.__sections)
+
+  @property
   def Name(self):
+    """this section's name string"""
     return self.__name
 
   @property
   def Settings(self):
+    """a list of this section's settings (in order)"""
     return self.__settings
 
 class TConfigurationFormatError(Exception):
@@ -391,8 +423,13 @@ class TConfigurationParser(object):
    }
 
 class TConfigurationDOMParser(TConfigurationParser):
+  """ Instances of this configuration file parser read entire section trees into memory.
+      They are akin to XML DOM parsers."""
 
   def __init__(self):
+    """ Construct a configuration file parser.  The client must invoke the
+        regular TConfigurationParser methods (ParseString(), ParseStrings(),
+        Finish(), etc.) to actually parse content."""
     self.__root = None
     def SectionBeginHandler(section, parent):
       if not self.__root:
@@ -411,9 +448,16 @@ class TConfigurationDOMParser(TConfigurationParser):
 
   @property
   def Root(self):
+    """the root section of the parsed configuration file (only valid after Finish() is invoked)"""
     return self.__root
 
 def WriteConfiguration(fobj, section, pretty_print=False, tab_size=2):
+  """ Write a configuration file to the specified file-like object.  'fobj' must
+      be a file-like object open for writing.  'section' is the root of the
+      configuration file.  'pretty_print' is a boolean specifying whether the
+      configuration file should be "pretty printed" (whitespace and newlines
+      added).  If 'pretty_print' is True, then 'tab_size' specifies the number
+      of spaces per generated tab; otherwise, 'tab_size' is ignored."""
   assert isinstance(section, TSection)
 
   def WriteEncodedString(text):
@@ -422,48 +466,70 @@ def WriteConfiguration(fobj, section, pretty_print=False, tab_size=2):
 
   num_tabs = 0
   if pretty_print:
+    section_open_text = '" {'
+    section_close_text = '}\n'
+    empty_section_text = '" {}'
+    attribute_begin_text = '" { "'
+    attribute_end_text = '" }\n'
     tab = ' ' * tab_size
     def WriteTabbed(text):
       fobj.write(tab * num_tabs + text)
     def WriteEndOfLine(text):
       fobj.write(text + '\n')
   else:
-    space = ""
+    section_open_text = '"{'
+    section_close_text = '}'
+    empty_section_text = '"{}'
+    attribute_begin_text = '"{"'
+    attribute_end_text = '"}'
     def WriteTabbed(text):
       fobj.write(text)
     def WriteEndOfLine(text):
       fobj.write(text)
 
-  section_stack = [(False, 0, section)]
+  def CloseSection():
+    nonlocal num_tabs
+    num_tabs -= 1
+    WriteTabbed(section_close_text)
+
+  section_stack = [(False, 0, 0, section)]
+
+  def WriteChildren(section, start_index):
+    for child_index, child in enumerate(section.Children[start_index:], start_index):
+      if isinstance(child, str):
+        WriteTabbed('"')
+        WriteEncodedString(child)
+        if child_index != len(section.Children) - 1:
+          WriteEndOfLine('";')
+        else:
+          WriteEndOfLine('"')
+      else:
+        assert isinstance(child, TSection)
+        section_stack.append((True, num_tabs, child_index + 1, section))
+        section_stack.append((False, num_tabs, 0, child))
+        return False
+    return True
+
   while section_stack:
-    visited, num_tabs, section = section_stack.pop()
+    visited, num_tabs, last_child_index, section = section_stack.pop()
     if visited:
-      WriteTabbed('}\n' if pretty_print else '}')
+      if last_child_index == len(section.Children) or WriteChildren(section, last_child_index):
+        CloseSection()
     else:
       WriteTabbed('"')
       WriteEncodedString(section.Name)
-      if section.HasSections() or section.Settings:
-        WriteEndOfLine('"' + space + '{')
-        num_tabs += 1
-        if section.Settings:
-          if len(section.Settings) == 1 and not section.HasSections():
-            WriteTabbed('"')
-            WriteEncodedString(section.Settings[0])
-            WriteEndOfLine('"')
-          else:
-            for setting in section.Settings:
-              WriteTabbed('"')
-              WriteEncodedString(setting)
-              WriteEndOfLine('";')
-        if section.HasSections():
-          section_stack.append((True, num_tabs - 1, section))
-          for subsection in section.YieldSections():
-            section_stack.append((False, num_tabs, subsection))
+      if section.HasChildren:
+        if len(section.Settings) == 1 and not section.HasSections:
+          fobj.write(attribute_begin_text)
+          WriteEncodedString(section.Settings[0])
+          fobj.write(attribute_end_text)
         else:
-          num_tabs -= 1
-          WriteTabbed('}\n' if pretty_print else '}')
+          WriteEndOfLine(section_open_text)
+          num_tabs += 1
+          if WriteChildren(section, last_child_index):
+            CloseSection()
       else:
-        WriteEndOfLine('"' + space + '{}')
+        WriteEndOfLine(empty_section_text)
 
 
 
