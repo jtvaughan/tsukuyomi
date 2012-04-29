@@ -164,11 +164,17 @@ Running 月詠
 
    In this example, `port` is 8080.
 
+   The console or terminal will occasionally display diagnostic messages
+   ([HTTP](http://en.wikipedia.org/wiki/Hypertext_Transfer_Protocol) request
+   and response information) as you interact with 月詠 through your web browser.
+
 5. Open a web browser.
 
 6. Direct the web browser to the URL `http://127.0.0.1:[port]`, where
    `[port]` is the same number that you used in the
    aforementioned command.
+
+7. Enjoy!
 
 
 
@@ -341,8 +347,13 @@ describing the server's properties.  The configuration file's root
 must be named "server-configuration" and can contain any of the following
 attributes:
 
-1. _kotoba-flashcards-file_: If present, this attribute specifies
-   the path to a configuration file containing 言葉 flashcards (see below).
+1. _kotoba-flashcards-file_ (required): This attribute specifies the
+   path to a configuration file containing 言葉 flashcards (see below).
+2. _kotoba-flashcards-file_: This optional attribute specifies the
+   path to a log file to which 月詠 will append performance data.
+3. _kotoba-flashcards-max-leitner-bucket_: This optional attribute
+   specifies the maximum Leitner bucket number that flashcards can
+   have.  This must be a natural number.
 
 All paths in the configuration file are either absolute or relative to
 the directory containing the configuration file.
@@ -351,6 +362,7 @@ Here is a sample configuration file:
 
 >     "server-configuration" {
         "kotoba-flashcards-file" { "/日記/日本/日本語/言葉のフラッシュカード.txt" }
+        "kotoba-flashcards-max-leitner-bucket" { "4" }
     }
 
 
@@ -437,6 +449,21 @@ Notice:
 1. Matching parentheses only denote furigana when they follow one or more consecutive kanji characters.  Matching parentheses appearing anywhere else
 are treated as part of the regular flow of text.
 2. Furigana annotations do not work within furigana annotations.
+
+
+### 言葉 Flashcards Performance Log
+
+The user's performance with 言葉 flashcards will be recorded if the server's
+configuration file contains a valid `kotoba-flashcards-stats-log` attribute
+(see above).  Each record has the following fields (in left-to-right order):
+
+1. the timestamp representing the end of the quiz that generated the record;
+2. the SHA-1 hash of the flashcard for which the record was created; and
+3. the number of times the user had to revisit the card before he successfuly
+   answered it.
+
+New records are appended to the log file.  If the log file does not exist,
+then 月詠 will create it.
 
 
 

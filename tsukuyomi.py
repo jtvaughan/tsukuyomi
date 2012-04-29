@@ -1014,6 +1014,49 @@ class TEmptyDeckError(Exception):
      none are left."""
   pass
 
+class TFlashcard(object):
+  """ This is the base class for flashcards.  These flashcards use a basic
+      Leitner system.  Each card has an associated zero-indexed Leitner bucket
+      number.  Cards that the user answers correctly are promoted into higher
+      Leitner bucket numbers, whereas incorrectly-answered cards are demoted to
+      bucket zero.  The idea is that cards with higher bucket numbers are shown
+      to the user after increasingly large delays.
+
+      Subclasses should override __bytes__()."""
+
+  def __init__(self):
+    """ Construct a flashcard in Leitner bucket zero (the current deck)."""
+    self.__bucket = 0
+    super().__init__()
+
+  def Demote(self):
+    """ Move the flashcard into Leitner bucket zero (the current deck)."""
+    self.__bucket = 0
+
+  def Promote(self, max_bucket_number):
+    """ Move the flashcard into the next Leitner bucket, if possible.  The
+        parameter represents the largest Leitner bucket number.  This method
+        returns True if the card was promoted; otherwise, it returns False."""
+    if self.__bucket < max_bucket_number:
+      self.__bucket += 1
+      return True
+    return False
+
+  def SetBucket(self, bucket):
+    """ Set the card's Leitner bucket number."""
+    assert isinstance(bucket, int)
+    self.__bucket = bucket
+
+  @property
+  def Bucket(self):
+    """the card's Leitner bucket number"""
+    return self.__bucket
+
+  @property
+  def Hash(self):
+    """the hash digest of the flashcard as a hex string"""
+    return hashlib.sha1(bytes(self)).hexdigest()
+
 class TCardDeckStatistics(object):
   """Instances of this class record information about decks of cards and
      how well users perform with the decks."""
@@ -1064,8 +1107,7 @@ class TCardDeckStatistics(object):
     writer = TLogWriter(stream)
     cur_time = time.time()
     for card in self.__cards:
-      hasher = hashlib.sha1(bytes(card))
-      writer.Write((cur_time, hasher.hexdigest(), self.__retry_map.get(card, 0)))
+      writer.Write((cur_time, card.Hash, self.__retry_map.get(card, 0)))
 
   @property
   def CardsSeen(self):
@@ -1117,13 +1159,14 @@ class TCardDeck(object):
 
       Decks automatically recycle failed cards."""
 
-  def __init__(self, cards):
-    """ Construct a deck from the specified sequence of flashcards."""
+  def __init__(self, cards, max_leitner_bucket_number):
+    """ Construct a deck from the specified sequence of flashcards and the specified maximum Leitner bucket number."""
     self.__cards = list(cards)
     self.__failed_cards = []
     self.__current_card = None
     self.__current_card_marked = False
     self.__statistics = TCardDeckStatistics(self.__cards)
+    self.__max_leitner_bucket_number = max_leitner_bucket_number
     super().__init__()
 
   def GetCard(self):
@@ -1151,6 +1194,7 @@ class TCardDeck(object):
     self.__failed_cards.append(self.__current_card)
     self.__current_card_marked = True
     self.Statistics.CardFailed(self.__current_card)
+    self.__current_card.Demote()
 
   def MarkSucceeded(self):
     """ Mark the current card (that is, the card that was last drawn) as
@@ -1160,6 +1204,7 @@ class TCardDeck(object):
     assert not self.__current_card_marked
     self.__current_card_marked = True
     self.Statistics.CardPassed(self.__current_card)
+    self.__current_card.Promote(self.MaximumLeitnerBucketNumber)
 
   @property
   def CurrentCard(self):
@@ -1172,49 +1217,14 @@ class TCardDeck(object):
     return bool(self.__cards) or bool(self.__failed_cards)
 
   @property
+  def MaximumLeitnerBucketNumber(self):
+    """the maximum Leitner bucket number that a card can achieve"""
+    return self.__max_leitner_bucket_number
+
+  @property
   def Statistics(self):
     """the TCardDeckStatistics object associated with this deck"""
     return self.__statistics
-
-class TLeitnerFlashcard(object):
-  """ This is the base class for flashcards that use a basic Leitner system.
-      Each flashcard has an associated zero-indexed Leitner bucket number.
-      Cards that the user answers correctly are promoted into higher Leitner
-      bucket numbers, whereas incorrectly-answered cards are demoted to bucket
-      zero.  The idea is that cards with higher bucket numbers are shown to
-      the user after increasingly large delays.
-
-      Subclasses should override __bytes__()."""
-
-  def __init__(self):
-    """ Construct a flashcard in Leitner bucket zero (the current deck)."""
-    self.__bucket = 0
-    super().__init__()
-
-  def Demote(self):
-    """ Move the flashcard into Leitner bucket zero (the current deck)."""
-    self.__bucket = 0
-
-  def Promote(self, max_bucket_number):
-    """ Move the flashcard into the next Leitner bucket, if possible.  The
-        parameter represents the largest Leitner bucket number."""
-    if self.__bucket < max_bucket_number:
-      self.__bucket += 1
-
-  def SetBucket(self, bucket):
-    """ Set the card's Leitner bucket number."""
-    assert isinstance(bucket, int)
-    self.__bucket = bucket
-
-  @property
-  def Bucket(self):
-    """the card's Leitner bucket number"""
-    return self.__bucket
-
-  @property
-  def Hash(self):
-    """the SHA-1 digest of the flashcard as a hex string"""
-    return hashlib.sha1(bytes(card)).hexdigest()
 
 # TODO Make the callbacks take a buffer parameter.
 def GenerateCardHTML(handler_url, session_token, title, remaining_time_secs,
@@ -1408,7 +1418,7 @@ div.selectors {
 # Code for the 言葉 flashcards application
 ################################################################################
 
-class T言葉のフラッシュカード(TLeitnerFlashcard):
+class T言葉のフラッシュカード(TFlashcard):
   """ Instances of this class are Leitner flashcards with three parts: a
       Japanese text, an English translation (with optional notes), and the
       source of the Japanese text."""
@@ -1493,7 +1503,8 @@ CurrentDeck = None
 CardCount = 0
 CurrentSession = None
 FlashcardsFile = None
-MaxLeitnerBuckets = 6
+FlashcardsStatsLog = None
+MaxLeitnerBucket = None
 RemainingTimeSecs = 0
 
 ReversedCardOrientation = False
@@ -1588,7 +1599,7 @@ def HandlePost():
       CardCount = local_card_count
     if not isinstance(selector, TRandomSelector):
       random.shuffle(selector)
-    CurrentDeck = TCardDeck(selector)
+    CurrentDeck = TCardDeck(selector, MaxLeitnerBucket)
 
     # Finally, render the first card.
     return RenderCard()
@@ -1597,7 +1608,6 @@ def HandlePost():
   RemainingTimeSecs = StrToInt(request.forms.secs_left, "secs_left")
   if method == "success":
     CurrentDeck.MarkSucceeded()
-    CurrentDeck.CurrentCard.Promote(MaxLeitnerBuckets)
     if CurrentDeck.HasCards:
       return RenderCard()
     else:
@@ -1615,6 +1625,8 @@ def HandlePost():
 
 def Main():
   global FlashcardsFile
+  global FlashcardsStatsLog
+  global MaxLeitnerBucket
 
   parser = argparse.ArgumentParser(description="月詠は日本語を勉強するツールです。")
   parser.add_argument(
@@ -1674,10 +1686,32 @@ def Main():
       FlashcardsFile = EnsureAbsolutePath(section.Value, args.サーバの設定ファイル)
       if not os.path.isfile(FlashcardsFile):
         PrintErrorAndExit("The kotoba-flashcards-file '" + FlashcardsFile + "' is not a file.")
-      if not os.access(args.サーバの設定ファイル, os.R_OK):
+      if not os.access(FlashcardsFile, os.R_OK):
         PrintErrorAndExit("The kotoba-flashcards-file '" + FlashcardsFile + "' cannot be read.")
+    elif section.Name == "kotoba-flashcards-stats-log":
+      if FlashcardsStatsLog is not None:
+        PrintErrorAndExit("It has two 'kotoba-flashcards-stats-log' attributes.")
+      FlashcardsStatsLog = EnsureAbsolutePath(section.Value, args.サーバの設定ファイル)
+      if os.path.exists(FlashcardsStatsLog):
+        if not os.path.isfile(FlashcardsStatsLog):
+          PrintErrorAndExit("The kotoba-flashcards-file '" + FlashcardsStatsLog + "' is not a file.")
+        if not os.access(FlashcardsStatsLog, os.R_OK):
+          PrintErrorAndExit("The kotoba-flashcards-file '" + FlashcardsStatsLog + "' cannot be read.")
+    elif section.Name == "kotoba-flashcards-max-leitner-bucket":
+      if MaxLeitnerBucket is not None:
+        PrintErrorAndExit("It has two 'kotoba-flashcards-max-leitner-bucket' attributes.")
+      try:
+        MaxLeitnerBucket = int(section.Value)
+      except ValueError:
+        PrintErrorAndExit("It has a non-numeric 'kotoba-flashcards-max-leitner-bucket' value: " + section.Value)
+      if MaxLeitnerBucket < 0:
+        PrintErrorAndExit("'kotoba-flashcards-max-leitner-bucket' is less than zero.")
     else:
       PrintErrorAndExit("One setting has an invalid name: " + section.Name)
+
+  # Set defaults.
+  if MaxLeitnerBucket is None:
+    MaxLeitnerBucket = 6
 
   # Start the server.
   run(host='localhost', port=ポート番号, debug=True)
@@ -1789,7 +1823,7 @@ function setKanjiImage(url_text) {
     GenerateHTML5Ruby(振り仮名producer.Results, buf, "kanji", KanjiOnClickGenerator, KanjiOnMouseoverGenerator, "furigana", False)
     buf.write("<br />(Source: ")
     振り仮名producer.Reset()
-    振り仮名producer.Process(カード.英語)
+    振り仮名producer.Process(カード.Source)
     振り仮名producer.Finish()
     GenerateHTML5Ruby(振り仮名producer.Results, buf, "kanji", KanjiOnClickGenerator, KanjiOnMouseoverGenerator, "furigana", False)
     buf.write(")")
@@ -1835,7 +1869,16 @@ function setKanjiImage(url_text) {
    GenerateBottom)
 
 def RenderFinishPage(timed_out):
-  return "Timed out!" if timed_out else "Done!"
+  assert CurrentDeck is not None
+  buf = io.StringIO()
+  if FlashcardsStatsLog is not None:
+    try:
+      with open(FlashcardsStatsLog, "a") as logf:
+        CurrentDeck.Statistics.Log(logf)
+    except IOError as e:
+      buf.write("WARNING: Failed to open or write to the stats log: " + str(e) + "\n")
+  buf.write("Timed out!" if timed_out else "Done!")
+  return buf.getvalue()
 
 def StrToInt(text, name):
   try:
