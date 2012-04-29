@@ -1458,12 +1458,19 @@ class T言葉のフラッシュカードのパーサ(TConfigurationParser):
   """ This configuration file parser parses 言葉のフラッシュカード files.
       It passes each フラッシュカード to a client-supplied handler."""
 
-  def __init__(self, on_flashcard_handler):
+  def __init__(self, on_flashcard_handler, reverse_orientation=False):
     """ Construct a flashcard parser that passes each flashcard to the specified
-        unary handler."""
+        unary handler.  If 'reverse_orientation' is True, then the 日本語 and
+        英語 sides will be swapped."""
     self.__source = None
     self.__日本語 = None
     self.__英語 = None
+    if reverse_orientation:
+      def ConstructFlashcard(日本語, 英語, source):
+        return T言葉のフラッシュカード(英語, 日本語, source)
+    else:
+      def ConstructFlashcard(日本語, 英語, source):
+        return T言葉のフラッシュカード(日本語, 英語, source)
     def SectionBeginHandler(section, parent):
       if parent is None:
         if section.Name != "言葉のフラッシュカード":
@@ -1478,7 +1485,7 @@ class T言葉のフラッシュカードのパーサ(TConfigurationParser):
       if self.__日本語 is not None:
         if self.__英語 is None:
           raise T言葉のフラッシュカードFormatError(self.Line, self.Column, "フラッシュカード must have an 英語")
-        on_flashcard_handler(T言葉のフラッシュカード(self.__日本語, self.__英語, self.__source))
+        on_flashcard_handler(ConstructFlashcard(self.__日本語, self.__英語, self.__source))
         self.__英語 = None
         self.__日本語 = None
       elif self.__source is not None:
@@ -1591,7 +1598,7 @@ def HandlePost():
       nonlocal local_card_count
       selector.Add(カード)
       local_card_count += 1
-    parser = T言葉のフラッシュカードのパーサ(Handleカード)
+    parser = T言葉のフラッシュカードのパーサ(Handleカード, ReversedCardOrientation)
     with open(FlashcardsFile, "r") as f:
       parser.ParseStrings(f)
     parser.Finish()
@@ -1645,7 +1652,7 @@ def Main():
     sys.stderr.write("すみません、サーバのポート番号は駄目です。外のポート番号を使って下さい。\n")
     sys.exit(2)
 
-  # Ensure that the provided server configuration file is a readable file.
+  # Ensure that the providnonlocal 振り仮名があるed server configuration file is a readable file.
   if not os.path.isfile(args.サーバの設定ファイル):
     sys.stderr.write("すみません、" + args.サーバの設定ファイル + "はファイルじゃありません。外のパス名を使って下さい。\n")
     sys.exit(2)
@@ -1806,27 +1813,36 @@ function setKanjiImage(url_text) {
 }
 
 </script>"""
-  def GenerateFront():
-    buf = io.StringIO()
+  def RenderSource(buf):
     nonlocal 振り仮名がある
-    振り仮名producer.Reset()
-    振り仮名producer.Process(カード.日本語)
-    振り仮名producer.Finish()
-    GenerateHTML5Ruby(振り仮名producer.Results, buf, "kanji", KanjiOnClickGenerator, KanjiOnMouseoverGenerator, "furigana", False)
-    振り仮名がある = any(ペア.振り仮名 for ペア in 振り仮名producer.Results)
-    return buf.getvalue()
-  def GenerateBack():
-    buf = io.StringIO()
-    振り仮名producer.Reset()
-    振り仮名producer.Process(カード.英語)
-    振り仮名producer.Finish()
-    GenerateHTML5Ruby(振り仮名producer.Results, buf, "kanji", KanjiOnClickGenerator, KanjiOnMouseoverGenerator, "furigana", False)
     buf.write("<br />(Source: ")
     振り仮名producer.Reset()
     振り仮名producer.Process(カード.Source)
     振り仮名producer.Finish()
     GenerateHTML5Ruby(振り仮名producer.Results, buf, "kanji", KanjiOnClickGenerator, KanjiOnMouseoverGenerator, "furigana", False)
     buf.write(")")
+    振り仮名がある = 振り仮名がある or any(ペア.振り仮名 for ペア in 振り仮名producer.Results)
+  def GenerateFront():
+    nonlocal 振り仮名がある
+    buf = io.StringIO()
+    振り仮名producer.Reset()
+    振り仮名producer.Process(カード.日本語)
+    振り仮名producer.Finish()
+    GenerateHTML5Ruby(振り仮名producer.Results, buf, "kanji", KanjiOnClickGenerator, KanjiOnMouseoverGenerator, "furigana", False)
+    振り仮名がある = 振り仮名がある or any(ペア.振り仮名 for ペア in 振り仮名producer.Results)
+    if ReversedCardOrientation:
+      RenderSource(buf)
+    return buf.getvalue()
+  def GenerateBack():
+    nonlocal 振り仮名がある
+    buf = io.StringIO()
+    振り仮名producer.Reset()
+    振り仮名producer.Process(カード.英語)
+    振り仮名producer.Finish()
+    GenerateHTML5Ruby(振り仮名producer.Results, buf, "kanji", KanjiOnClickGenerator, KanjiOnMouseoverGenerator, "furigana", False)
+    振り仮名がある = 振り仮名がある or any(ペア.振り仮名 for ペア in 振り仮名producer.Results)
+    if not ReversedCardOrientation:
+      RenderSource(buf)
     return buf.getvalue()
   def GenerateSelectors():
     buf = io.StringIO()
@@ -1858,11 +1874,6 @@ function setKanjiImage(url_text) {
     return buf.getvalue()
   def GenerateBottom():
     return """<img name="漢字diagram" style="display: none" alt="漢字 Stroke Diagram" src="" />"""
-
-  # If we should reverse the card orientation, then swap the front and
-  # back generators.
-  if ReversedCardOrientation:
-    GenerateFront, GenerateBack = GenerateBack, GenerateFront
 
   return GenerateCardHTML("/", CurrentSession, "言葉の試験", RemainingTimeSecs,
    GenerateHead, GenerateFront, GenerateBack, GenerateSelectors, GenerateStats,
