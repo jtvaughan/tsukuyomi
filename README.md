@@ -89,7 +89,7 @@ tools available, such as [Anki](http://ankisrs.net/) and
    All I needed was a tool or two that I could use to learn Japanese.
 2. I despise using [SQLite](http://www.sqlite.org/) to
    store and retrieve flashcards.  I wanted to be able to easily edit my
-   flashcards files with a text editor.
+   flashcard files with a text editor.
 3. I want finer control over the way statistics are generated
    and displayed.
 4. I want to write several different kinds of tools to aid my
@@ -195,7 +195,7 @@ much easier to edit, parse, and read.
 There are two fundamental entities in configuration files:
 
 1. _Settings_: A _setting_ is a chunk of text.
-2. _Sections_: A _section_ is a chunk of text associated with zero or more
+2. _Sections_: A _section_ is a chunk of text containing zero or more
    settings and sections.
 
 Here is a simplified [grammar](http://en.wikipedia.org/wiki/Context-free_grammar)
@@ -253,13 +253,13 @@ There are a few things to note about configuration files:
    this respect.
 2. The `TEXT` preceding a section's `OPENING-BRACE` is called the
    section's _name_.
-3. A section cannot have two associated sections with the same name.
+3. A section cannot contain sections with the same name.
    In other words, if configuration files are viewed as trees with
    sections as nodes, then two sections with the same name cannot have
    the same parent.
-4. A section other than the root with no associated sections and at most
+4. A section other than the root containing no sections and at most
    one setting is called an _attribute_.  An attribute's setting is called
-   the attribute's _value_.  If an attribute has no associated setting,
+   the attribute's _value_.  If an attribute does not contain a setting,
    then it is said to have an _empty value_.
 5. The order in which settings and sections appear within a section's
    `section-contents` might be relevant depending on how the file is

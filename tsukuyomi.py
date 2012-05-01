@@ -20,6 +20,7 @@ __license__ = "Public Domain"
 
 import argparse
 import collections
+import errno
 import hashlib
 import heapq
 import io
@@ -163,8 +164,8 @@ class TSection(object):
   """ Instances of this class represent sections within configuration files.
       As explained in README.md, configuration file sections are like inner
       nodes within N-ary trees.  Each section may contain settings (strings)
-      or associated (child) sections.  The only restriction is that a section's
-      associated sections cannot not share the same name."""
+      or sections.  The only restriction is that the contained sections cannot
+      share the same name."""
 
   def __init__(self, name):
     """ Construct an empty TSection with the specified name string."""
@@ -175,8 +176,8 @@ class TSection(object):
     super().__init__()
 
   def AddSection(self, section):
-    """ Associate the specified TSection with this section.  This raises
-        KeyError if there is already an associated section with the specified
+    """ Add the specified TSection to this section.  This raises
+        KeyError if this section already contains a section with the specified
         TSection's name."""
     assert isinstance(section, TSection)
     assert section is not self
@@ -190,12 +191,12 @@ class TSection(object):
     self.__children.append(setting)
 
   def GetSection(self, name):
-    """ Get the associated section with the specified name.  This raises
-        KeyError if there is no such associated section."""
+    """ Get the section with the specified name.  This raises
+        KeyError if this section contains no section with the specified name."""
     return self.__sections[name]
 
   def HasSection(self, name):
-    """ Determine whether there is an associated section with the specified name."""
+    """ Determine whether this section contains a section with the specified name."""
     return name in self.__sections
 
   def YieldSections(self):
@@ -210,17 +211,17 @@ class TSection(object):
 
   @property
   def Children(self):
-    """a list of the section's settings and associated sections (read-only)"""
+    """a list of the section's settings and sections (read-only)"""
     return self.__children
 
   @property
   def HasChildren(self):
-    """True if this section has settings or associated sections, False otherwise"""
+    """True if this section contains settings or sections, False otherwise"""
     return bool(self.__children)
 
   @property
   def HasSections(self):
-    """True if this section has associated sections, False otherwise"""
+    """True if this section contains sections, False otherwise"""
     return bool(self.__sections)
 
   @property
@@ -230,7 +231,7 @@ class TSection(object):
 
   @property
   def IsAttribute(self):
-    """True if this section is an attribute (it has one setting and no associated sections), False otherwise"""
+    """True if this section is an attribute (it contains one setting and no sections), False otherwise"""
     return len(self.Settings) == 1 and not self.HasSections
 
   @property
@@ -634,16 +635,19 @@ class TLogParser(object):
     for line in text_generator:
       self.ParseString(line)
 
+  def SetRecordCb(self, callback):
+    self.__entry_callback = callback
+
   @property
   def AbsolutePosition(self):
     return self.__absolute_position
 
   @property
-  def EntryCb(self):
+  def RecordCb(self):
     return self.__entry_callback
 
-  @EntryCb.setter
-  def EntryCb(self, entry_callback):
+  @RecordCb.setter
+  def RecordCb(self, entry_callback):
     self.__entry_callback = entry_callback
 
   @property
@@ -667,7 +671,7 @@ class TLogParser(object):
       entry = tuple(self.__fields)
       self.__fields = []
       self.__entry += 1
-      self.EntryCb(entry)
+      self.RecordCb(entry)
 
   def __HandlePreField(self, char):
     if not char.isspace():
@@ -696,7 +700,7 @@ class TLogParser(object):
       self.__state = self.__FIELD
     else:
       self.__fields.append(self.__field_buffer.getvalue())
-      self.__field_buffer.truncate(0)
+      self.__field_buffer = io.StringIO()
       if char == '\n':
         self.__FinishEntry(self.__PRE_FIELD)
       elif char.isspace():
@@ -1226,6 +1230,194 @@ class TCardDeck(object):
     """the TCardDeckStatistics object associated with this deck"""
     return self.__statistics
 
+class TInvalidFlashcardStatsRecord(Exception):
+  """ ApplyStatsLogToFlashcards() raises this exception when it processes an invalid log record."""
+
+  def __init__(self, line, reason):
+    """ Construct an exception with the specified log file line number and reason for the exception."""
+    self.__line = line
+    self.__reason = reason
+    super().__init__(line, reason)
+
+  def __str__(self):
+    return str(self.Line) + ": " + str(self.Reason)
+
+  @property
+  def Line(self):
+    """the log file line of the record that generated this exception"""
+    return self.__line
+
+  @property
+  def Reason(self):
+    """the reason why this exception was generated (should be a string)"""
+    return self.__reason
+
+def CreateFlashcardHashToLeitnerBucketMap(handler_setter_function, parser_crank_function):
+  """ Parse flashcards and construct a dictionary mapping flashcard hashes to zeros.
+      "Flashcards" are objects that have Hash() functions that return
+      hexadecimal hash codes as strings.  'handler_setter_function' is a unary
+      function returning nothing and taking a unary function that returns
+      nothing but takes a single flashcard as input.  (That is,
+      'handler_setter_function' has the type "(TFlashcard -> ()) -> ().")
+      'handler_setter_function' should take its function parameter and make it
+      the function that the flashcard parser invokes to process parsed
+      flashcards.  'parser_crank_function' is a nullary function that completely
+      executes the parser and returns nothing."""
+  hashes_to_buckets = {}
+  def Handleカード(カード):
+    hashes_to_buckets[カード.Hash] = 0
+  handler_setter_function(Handleカード)
+  parser_crank_function()
+  return hashes_to_buckets
+
+def ApplyStatsLogToFlashcards(handler_setter_function, parser_crank_function, hashes_to_buckets, bucket_counts):
+  """ Parse flashcard performance log entries and adjust the Leitner buckets of the specified flashcards accordingly.
+      "Flashcards" are objects that have Hash() functions that return
+      hexadecimal hash codes as strings.  'handler_setter_function' is a unary
+      function returning nothing and taking a unary function that returns
+      nothing but takes a single log record as input.  (That is,
+      'handler_setter_function' has the type "(record -> ()) -> ().")
+      'handler_setter_function' should take its function parameter and make it
+      the function that the log parser invokes to process parsed records.
+      'parser_crank_function' is a nullary function that completely
+      executes the parser and returns nothing.  'hashes_to_buckets' is a
+      dictionary mapping flashcard hashes to their Leitner bucket numbers.
+      'bucket_counts' is a list of Leitner bucket flashcard counts.  This
+      function assumes that the maximum Leitner bucket number is
+      "len(bucket_counts) - 1".
+
+      This function returns nothing but modifies the contents of
+      'hashes_to_buckets' and 'bucket_counts'.
+
+      This function raises TInvalidFlashcardStatsRecord if it processes an
+      invalid flashcard stats record."""
+  max_leitner_bucket = len(bucket_counts) - 1
+  def HandleLogEntry(record):
+    if len(record) != 3:
+      raise TInvalidFlashcardStatsRecord(parser.Line, "record does not have three fields")
+    if record[1] in hashes_to_buckets:
+      try:
+        num_retries = int(record[2])
+      except ValueError:
+        raise TInvalidFlashcardStatsRecord(parser.Line, "num_retries field is not an integer")
+      old_bucket = hashes_to_buckets[record[1]]
+      if num_retries == 0:
+        new_bucket = old_bucket + (1 if old_bucket < max_leitner_bucket else 0)
+      else:
+        new_bucket = 0
+      bucket_counts[old_bucket] -= 1
+      bucket_counts[new_bucket] += 1
+      hashes_to_buckets[record[1]] = new_bucket
+  handler_setter_function(HandleLogEntry)
+  parser_crank_function()
+
+class TCardDeckFactory(object):
+  """ Instances of this class construct flashcard decks (TCardDeck objects).
+      The cards are selected randomly from a flashcard file (usually a
+      configuration file) after the pool of cards is decorated with performance
+      data from a stats log file.
+
+      This class relies heavily on CreateFlashcardHashToLeitnerBucketMap() and
+      ApplyStatsLogToFlashcards()."""
+
+  def __init__(self, flashcard_cf_file, new_cf_parser_cb, set_cf_handler_cb, stats_log_file, new_log_parser_cb, set_record_handler_cb, max_leitner_bucket):
+    """ Construct a new factory.  'flashcard_cf_file' is the path to the
+        flashcard file.  'new_cf_parser_cb' is a function (() -> Parser)
+        that constructs a new parser to parse flashcards in 'flashcard_cf_file'.
+        'set_cf_handler_cb' is a function ((Parser, (TFlashcard -> ())) -> ())
+        that sets the specified parser's flashcard handler to the specified
+        function.  'stats_log_file' is the path to the stats log file.
+        'new_log_parser_cb' and 'set_record_handler_cb' are similar to
+        'new_cf_parser_cb' and 'set_cf_handler_cb' except that they operate
+        on log parsers.  'max_leitner_bucket' is the maximum Leitner
+        bucket number."""
+    self.__flashcard_cf_file = flashcard_cf_file
+    self.__new_cf_parser_cb = new_cf_parser_cb
+    self.__set_cf_handler_cb = set_cf_handler_cb
+    self.__new_log_parser_cb = new_log_parser_cb
+    self.__max_leitner_bucket = max_leitner_bucket
+
+    # First, construct a map of flashcard hashes to Leitner buckets.
+    parser = new_cf_parser_cb()
+    def SetHandler(flashcard_handler):
+      set_cf_handler_cb(parser, flashcard_handler)
+    def ParserCrank():
+      with open(flashcard_cf_file, "r") as f:
+        parser.ParseStrings(f)
+      parser.Finish()
+    hashes_to_buckets = CreateFlashcardHashToLeitnerBucketMap(SetHandler, ParserCrank)
+    self.__card_count = len(hashes_to_buckets)
+    bucket_counts = [0] * (max_leitner_bucket + 1)
+    bucket_counts[0] = self.__card_count
+
+    # Second, apply the stats file to the cards.
+    # This will change the cards' Leitner buckets.
+    self.__log_exists = True
+    parser = new_log_parser_cb()
+    def SetHandler(record_handler):
+      set_record_handler_cb(parser, record_handler)
+    def ParserCrank():
+      try:
+        with open(FlashcardsStatsLog, "r") as f:
+          parser.ParseStrings(f)
+        parser.Finish()
+      except IOError as e:
+        if e.errno != errno.ENOENT:
+          raise e
+        self.__log_exists = False
+    ApplyStatsLogToFlashcards(SetHandler, ParserCrank, hashes_to_buckets, bucket_counts)
+    self.__hashes_to_buckets = hashes_to_buckets
+    self.__bucket_counts = bucket_counts
+    super().__init__()
+
+  def ConstructDeck(self, max_cards):
+    """ Sample up to 'max_cards' cards.  This will return an iterable collection
+        of flashcards."""
+    # Create TRandomSelectors for the Leitner buckets.
+    if max_cards < self.NumberOfCards and self.__log_exists:
+      selectors = []
+      max_bucket = 0
+      cards_left = max_cards
+      while cards_left > 0:
+        selectors.append(TRandomSelector(min(self.__bucket_counts[max_bucket], cards_left)))
+        cards_left -= self.__bucket_counts[max_bucket]
+        max_bucket += 1
+    else:
+      max_bucket = self.MaximumLeitnerBucket + 1
+      selectors = list(TRandomSelector(max_cards) for bucket in range(max_bucket))
+
+    # Pass through the flashcard file and randomly pick cards.
+    def Handleカード(カード):
+      bucket = self.__hashes_to_buckets[カード.Hash]
+      if bucket < max_bucket and self.__bucket_counts[bucket]:
+        selectors[bucket].Add(カード)
+    parser = self.__new_cf_parser_cb()
+    self.__set_cf_handler_cb(parser, Handleカード)
+    with open(self.__flashcard_cf_file, "r") as f:
+      parser.ParseStrings(f)
+    parser.Finish()
+
+    # Return the combined, shuffled results.
+    combined_results = TRandomSelector(max_cards)
+    for selector in selectors:
+      combined_results.ConsumeSequence(selector)
+    return combined_results
+
+  @property
+  def BucketCounts(self):
+    """a list of Leitner bucket counts"""
+    return list(self.__bucket_counts)
+
+  @property
+  def MaximumLeitnerBucket(self):
+    """the maximum Leitner bucket number"""
+    return self.__max_leitner_bucket
+
+  @property
+  def NumberOfCards(self):
+    """the total number of flashcards in the flashcard pool"""
+    return self.__card_count
+
 # TODO Make the callbacks take a buffer parameter.
 def GenerateCardHTML(handler_url, session_token, title, remaining_time_secs,
  head_creator, front_content_creator, back_content_creator, selectors_creator,
@@ -1283,20 +1475,23 @@ def GenerateCardHTML(handler_url, session_token, title, remaining_time_secs,
   BeginHTML5(buf, title=title)
   buf.write("""<style type="text/css">
 
-.toplevel {
+body {
+  margin: 0px;
+  padding: 0px;
+  width: 100%;
+  height: 100%;
+}
+
+div.toplevel {
+  position: absolute;
+  margin: auto;
+  top: 0px;
+  bottom: 0px;
+  left: 0px;
+  right: 0px;
   text-align: center;
   background: #c0c0c0;
   padding: 10px 15px;
-}
-
-.toplevel:before {
-  content: '';
-  display: inline-block;
-  height: 100%;
-  vertical-align: middle;
-  margin-right: -0.25em;  /* adjusts for spacing */
-  /* For visualization */
-  /* background: #808080; width: 5px; */
 }
 
 div.card {
@@ -1318,6 +1513,7 @@ div.front {
   font-size: xx-large;
   text-align: center;
   border: black solid 1px;
+  padding: 0.5em 0.5em;
   margin: 1em 1em;
 }
 
@@ -1362,7 +1558,7 @@ div.selectors {
            ));
           t = setTimeout("UpdateSecondsDisplay();", 1000);
         }}</script>""")
-  buf.write("""<body><div class="toplevel" height="100%"><div class="card"><div class="front">""")
+  buf.write("""<body><div class="toplevel"><div class="card"><div class="front">""")
   buf.write(front_content_creator())
   buf.write('</div><div id="hidden_portion" style="visibility:hidden;"><div class="back">')
   buf.write(back_content_creator())
@@ -1465,6 +1661,7 @@ class T言葉のフラッシュカードのパーサ(TConfigurationParser):
     self.__source = None
     self.__日本語 = None
     self.__英語 = None
+    self.__handler = on_flashcard_handler
     if reverse_orientation:
       def ConstructFlashcard(日本語, 英語, source):
         return T言葉のフラッシュカード(英語, 日本語, source)
@@ -1485,7 +1682,7 @@ class T言葉のフラッシュカードのパーサ(TConfigurationParser):
       if self.__日本語 is not None:
         if self.__英語 is None:
           raise T言葉のフラッシュカードFormatError(self.Line, self.Column, "フラッシュカード must have an 英語")
-        on_flashcard_handler(ConstructFlashcard(self.__日本語, self.__英語, self.__source))
+        self.__Handleカード(ConstructFlashcard(self.__日本語, self.__英語, self.__source))
         self.__英語 = None
         self.__日本語 = None
       elif self.__source is not None:
@@ -1498,6 +1695,18 @@ class T言葉のフラッシュカードのパーサ(TConfigurationParser):
       else:
         self.__英語 = setting
     super().__init__(SectionBeginHandler, SectionEndHandler, SettingHandler)
+
+  def __Handleカード(self, カード):
+    self.__handler(カード)
+
+  def SetカードHandler(self, handler):
+    """ Set the function (TFlashcard -> ()) that will process parsed cards."""
+    self.__handler = handler
+
+  @property
+  def カードのHandler(self):
+    """the function (TFlashcard -> ()) that will process parsed cards"""
+    return self.__handler
 
 
 
@@ -1522,20 +1731,40 @@ def Config():
   global CurrentSession
   CurrentSession = str(random.random())
 
-  if not CardCount:
-    def Handleカード(カード):
-      global CardCount
-      CardCount += 1
-    parser = T言葉のフラッシュカードのパーサ(Handleカード)
-    with open(FlashcardsFile, "r") as f:
-      parser.ParseStrings(f)
-    parser.Finish()
+  deck_factory = TCardDeckFactory(
+    FlashcardsFile,
+    lambda: T言葉のフラッシュカードのパーサ(None, False),
+    lambda parser, handler: parser.SetカードHandler(handler),
+    FlashcardsStatsLog,
+    lambda: TLogParser(None),
+    lambda parser, handler: parser.SetRecordCb(handler),
+    MaxLeitnerBucket
+   )
+  reversed_deck_factory = TCardDeckFactory(
+    FlashcardsFile,
+    lambda: T言葉のフラッシュカードのパーサ(None, True),
+    lambda parser, handler: parser.SetカードHandler(handler),
+    FlashcardsStatsLog,
+    lambda: TLogParser(None),
+    lambda parser, handler: parser.SetRecordCb(handler),
+    MaxLeitnerBucket
+   )
+  CardCount = deck_factory.NumberOfCards
 
   buf = io.StringIO()
   BeginHTML5(buf, title="言葉の試験 Setup")
-  buf.write("""</head><body><p><h1>言葉の試験 Setup</h1></p>
-<p>Card Count: {0}</p>
-<p><form method="post" action="{1}">
+  buf.write("</head><body><p><h1>言葉の試験 Setup</h1></p><p>Card Count: ")
+  buf.write(str(CardCount))
+  buf.write("</p><p><table border='1'><caption>Leitner Bucket Distribution</caption><tr><th style='text-align: left'>Bucket Number</th>")
+  for bucket in range(deck_factory.MaximumLeitnerBucket + 1):
+    buf.write("<td style='text-align: center'>" + str(bucket) + "</td>")
+  buf.write("</tr><tr><th style='text-align: left'>Bucket Card Count</th>")
+  for bucket_count in deck_factory.BucketCounts:
+    buf.write("<td style='text-align: center'>" + str(bucket_count) + "</td>")
+  buf.write("</tr><tr><th style='text-align: left'>Bucket Card Count (Reversed)</th>")
+  for bucket_count in reversed_deck_factory.BucketCounts:
+    buf.write("<td style='text-align: center'>" + str(bucket_count) + "</td>")
+  buf.write("""</table></p><p><form method="post" action="{0}">
 <fieldset><legend>Limits</legend><p>
 <label>Time:</label>
 <input type="text" id="時" name="hours" /><label for="時">時</label>
@@ -1551,8 +1780,8 @@ def Config():
 </p></fieldset>
 <input type="submit" value="始めましょう！" />
 <input type="hidden" name="method" value="configure" />
-<input type="hidden" name="session_token" value="{2}" />
-</form></p></body></html>""".format(CardCount, QuizURL, CurrentSession))
+<input type="hidden" name="session_token" value="{1}" />
+</form></p></body></html>""".format(QuizURL, CurrentSession))
   return buf.getvalue()
 
 @post(QuizURL)
@@ -1579,13 +1808,6 @@ def HandlePost():
     RemainingTimeSecs = 60 * 60 * StrToInt(request.forms.hours, "hours")
     RemainingTimeSecs += 60 * StrToInt(request.forms.minutes, "minutes")
     RemainingTimeSecs += StrToInt(request.forms.seconds, "seconds")
-    if request.forms.max_cards:
-      selector = TRandomSelector(StrToInt(request.forms.max_cards, "max_cards"))
-    else:
-      class TUnboundedSelector(list):
-        def Add(self, カード):
-          self.append(カード)
-      selector = TUnboundedSelector()
 
     # Determine the card orientation.
     if not request.forms.card_orientation:
@@ -1593,20 +1815,23 @@ def HandlePost():
     ReversedCardOrientation = (request.forms.card_orientation == "reversed")
 
     # Parse the flashcards file and create a deck from some of the cards.
-    local_card_count = 0
-    def Handleカード(カード):
-      nonlocal local_card_count
-      selector.Add(カード)
-      local_card_count += 1
-    parser = T言葉のフラッシュカードのパーサ(Handleカード, ReversedCardOrientation)
-    with open(FlashcardsFile, "r") as f:
-      parser.ParseStrings(f)
-    parser.Finish()
-    if local_card_count != CardCount:
-      CardCount = local_card_count
-    if not isinstance(selector, TRandomSelector):
-      random.shuffle(selector)
-    CurrentDeck = TCardDeck(selector, MaxLeitnerBucket)
+    deck_factory = TCardDeckFactory(
+      FlashcardsFile,
+      lambda: T言葉のフラッシュカードのパーサ(None, ReversedCardOrientation),
+      lambda parser, handler: parser.SetカードHandler(handler),
+      FlashcardsStatsLog,
+      lambda: TLogParser(None),
+      lambda parser, handler: parser.SetRecordCb(handler),
+      MaxLeitnerBucket
+     )
+    CurrentDeck = TCardDeck(
+      deck_factory.ConstructDeck(
+        StrToInt(request.forms.max_cards, "max_cards")
+         if request.forms.max_cards
+         else deck_factory.NumberOfCards
+       ),
+      MaxLeitnerBucket
+     )
 
     # Finally, render the first card.
     return RenderCard()
