@@ -355,6 +355,37 @@ attributes:
    specifies the maximum Leitner bucket number that flashcards can
    have.  This must be a natural number.
 
+Additionally, the root may contain the following sections:
+
+1. _kotoba-leitner-buckets_: This section describes properties about the
+   [Leitner buckets](http://en.wikipedia.org/wiki/Leitner_system) into
+   which 言葉 flashcards are sorted.
+
+   This section should only contain settings.  Each setting is a natural
+   number representing the number of days after which cards placed
+   into the corresponding Leitner bucket will be due for review.
+   The total number of Leitner buckets is the number of settings in
+   this section plus one.  (Bucket zero is always defined.  Its delay
+   is zero, which means that cards that the user fails to answer will
+   be immediately due for review.)
+
+   Although you can use any natural numbers you want as delays, it makes
+   sense to increase the delay as cards move into higher-numbered
+   Leitner buckets.  The following example might be a useful configuration:
+
+>     "kotoba-leitner-buckets" {
+>         "1";
+>         "3";
+>         "14";
+>         "30";
+>         "90";
+>         "180"
+>     }
+
+   In this example, the Leitner buckets' delays in increasing order by
+   Leitner bucket number are 0, 1, 3, 14, 30, 90, and 180 days.  There
+   are seven buckets in this example.
+
 All paths in the configuration file are either absolute or relative to
 the directory containing the configuration file.
 

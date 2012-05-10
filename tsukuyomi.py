@@ -24,6 +24,7 @@ import errno
 import hashlib
 import heapq
 import io
+import itertools
 import os
 import os.path
 import random
@@ -153,7 +154,6 @@ class TRandomSelector(object):
   def Capacity(self):
     """the sample list's capacity in entries"""
     return self.__capacity
-
 
 
 ################################################################################
@@ -1014,47 +1014,114 @@ def BeginHTML5(buf, title="Untitled", encoding="UTF-8"):
 ################################################################################
 
 class TEmptyDeckError(Exception):
-  """TCardDeck raises this exception whenever clients try to draw cards when
-     none are left."""
+  """TCardDeck raises this exception whenever clients try to draw cards when none are left."""
   pass
 
-class TFlashcard(object):
-  """ This is the base class for flashcards.  These flashcards use a basic
-      Leitner system.  Each card has an associated zero-indexed Leitner bucket
-      number.  Cards that the user answers correctly are promoted into higher
-      Leitner bucket numbers, whereas incorrectly-answered cards are demoted to
-      bucket zero.  The idea is that cards with higher bucket numbers are shown
-      to the user after increasingly large delays.
+class TLeitnerBucket(object):
+  """ Instances of this class represent Leitner buckets.  Each Leitner bucket
+      tracks the number of flashcards associated with it and records the
+      delay (in seconds) that should be added to each card that moves to
+      the bucket."""
 
-      Subclasses should override __bytes__()."""
-
-  def __init__(self):
-    """ Construct a flashcard in Leitner bucket zero (the current deck)."""
-    self.__bucket = 0
+  def __init__(self, delay_in_secs):
+    """ Construct a new Leitner bucket with no associated cards.
+        'delay_in_secs' is the number of seconds that should be to incoming
+        cards' due dates."""
+    assert delay_in_secs >= 0
+    self.__delay_in_secs = delay_in_secs
+    self.__num_cards = 0
+    self.__num_due_cards = 0
     super().__init__()
 
-  def Demote(self):
-    """ Move the flashcard into Leitner bucket zero (the current deck)."""
-    self.__bucket = 0
+  def AddStub(self, stub, date_touched, now):
+    """ Increment the total card count by one.  Also increment the due card
+        count if necessary.  'date_touched' must be a timestamp representing
+        the last time the card represented by the stub was touched.
+        'now' must be a timestamp representing the present."""
+    self.__num_cards += 1
+    stub.SetDueDate(date_touched, self.DelayInSeconds)
+    if stub.IsDue(now):
+      self.__num_due_cards += 1
 
-  def Promote(self, max_bucket_number):
-    """ Move the flashcard into the next Leitner bucket, if possible.  The
-        parameter represents the largest Leitner bucket number.  This method
-        returns True if the card was promoted; otherwise, it returns False."""
-    if self.__bucket < max_bucket_number:
-      self.__bucket += 1
-      return True
-    return False
-
-  def SetBucket(self, bucket):
-    """ Set the card's Leitner bucket number."""
-    assert isinstance(bucket, int)
-    self.__bucket = bucket
+  def RemoveStub(self, stub, now):
+    """ Decrement the total card count.  Also decrement the due card count
+        if the card associated with the specified stub is due.  'now' must be
+        a timestamp representing the present."""
+    assert self.__num_cards > 0
+    self.__num_cards -= 1
+    if stub.IsDue(now):
+      assert self.__num_due_cards > 0
+      self.__num_due_cards -= 1
 
   @property
-  def Bucket(self):
-    """the card's Leitner bucket number"""
-    return self.__bucket
+  def CardCount(self):
+    """the number of cards in this bucket"""
+    return self.__num_cards
+
+  @property
+  def DelayInSeconds(self):
+    """the delay in seconds added to cards' due dates when they are added to this bucket"""
+    return self.__delay_in_secs
+
+  @property
+  def DueCardCount(self):
+    """the number of cards in this bucket that are due"""
+    return self.__num_due_cards
+
+class TFlashcardStub(object):
+  """ Instances of this class contain flashcard metadata.  The deck construction
+      algorithms construct stubs instead of full-blown flashcards while parsing
+      stats logs to avoid hogging memory."""
+
+  _NEVER_TOUCHED = float("-inf")
+
+  def __init__(self, card_hash):
+    """ Construct a flashcard stub with the specified hash.  The stub will
+        represent a flashcard that is due immediately."""
+    self.__hash = card_hash
+    self.__bucket_index = 0
+    self.__due_date = self._NEVER_TOUCHED
+    super().__init__()
+
+  def IsDue(self, now):
+    """ Determine whether the flashcard associated with this stub is due at the specified time."""
+    return self.DueDate <= now
+
+  def SetBucketIndex(self, index):
+    """ Set this stub's Leitner bucket index."""
+    self.__bucket_index = index
+
+  def SetDueDate(self, now, delay_in_secs):
+    """ Set this stub's due date to the sum of the specified timestamp and delay in seconds."""
+    self.__due_date = now + delay_in_secs
+
+  @property
+  def BucketIndex(self):
+    """the index of the TLeitnerBucket associated with this stub"""
+    return self.__bucket_index
+
+  @property
+  def DueDate(self):
+    """the associated flashcard's due date as a timestamp"""
+    return self.__due_date
+
+  @property
+  def Hash(self):
+    """the associated flashcard's hash as a hex string"""
+    return self.__hash
+
+  @property
+  def IsNewCard(self):
+    """True if the card was never touched, False otherwise"""
+    return self.__due_date == self._NEVER_TOUCHED
+
+class TFlashcard(object):
+  """ This is the base class for flashcards.  Subclasses should
+      override __bytes__()."""
+
+  def __init__(self):
+    """何もしません。"""
+    super().__init__()
 
   @property
   def Hash(self):
@@ -1066,9 +1133,8 @@ class TCardDeckStatistics(object):
      how well users perform with the decks."""
 
   def __init__(self, cards):
-    """Construct a new stats object that records information about the
-       specified collection of cards.  NOTE: 'cards' must have a
-       __len__() method."""
+    """ Construct a new stats object that records information about the specified collection of cards.
+        NOTE: 'cards' must have a __len__() method."""
     self.__cards = set()                  # the set of all cards that the user has seen
     self.__num_cards = len(cards)         # total number of cards
     self.__num_passed_on_first_try = 0    # number passed on first attempt
@@ -1096,7 +1162,7 @@ class TCardDeckStatistics(object):
 
   # Log format:
   #
-  #   <date-stamp>:<card-hash>:<num-retries>
+  #   <date-stamp>:<card-hash>:<failed-flag>
   def Log(self, stream):
     """ Write statistics about cards that the user has seen to the specified
         file-like object.  The data is stored as log entries.  Each entry has
@@ -1109,9 +1175,9 @@ class TCardDeckStatistics(object):
           3. the number of times the user had to retry the card before he
              successfully answered it."""
     writer = TLogWriter(stream)
-    cur_time = time.time()
+    now = time.time()
     for card in self.__cards:
-      writer.Write((cur_time, card.Hash, self.__retry_map.get(card, 0)))
+      writer.Write((now, card.Hash, self.__retry_map.get(card, 0)))
 
   @property
   def CardsSeen(self):
@@ -1150,7 +1216,7 @@ class TCardDeckStatistics(object):
 
 class TCardDeck(object):
   """ Instances of this class represent decks of flashcards.  The cards may
-      be of any type.
+      be of any type extending TFlashcard.
 
       Clients typically use this class as follows:
 
@@ -1163,14 +1229,13 @@ class TCardDeck(object):
 
       Decks automatically recycle failed cards."""
 
-  def __init__(self, cards, max_leitner_bucket_number):
-    """ Construct a deck from the specified sequence of flashcards and the specified maximum Leitner bucket number."""
+  def __init__(self, cards):
+    """ Construct a deck from the specified sequence of flashcards."""
     self.__cards = list(cards)
     self.__failed_cards = []
     self.__current_card = None
     self.__current_card_marked = False
     self.__statistics = TCardDeckStatistics(self.__cards)
-    self.__max_leitner_bucket_number = max_leitner_bucket_number
     super().__init__()
 
   def GetCard(self):
@@ -1198,7 +1263,6 @@ class TCardDeck(object):
     self.__failed_cards.append(self.__current_card)
     self.__current_card_marked = True
     self.Statistics.CardFailed(self.__current_card)
-    self.__current_card.Demote()
 
   def MarkSucceeded(self):
     """ Mark the current card (that is, the card that was last drawn) as
@@ -1208,7 +1272,6 @@ class TCardDeck(object):
     assert not self.__current_card_marked
     self.__current_card_marked = True
     self.Statistics.CardPassed(self.__current_card)
-    self.__current_card.Promote(self.MaximumLeitnerBucketNumber)
 
   @property
   def CurrentCard(self):
@@ -1219,11 +1282,6 @@ class TCardDeck(object):
   def HasCards(self):
     """True if the deck is not empty, False otherwise"""
     return bool(self.__cards) or bool(self.__failed_cards)
-
-  @property
-  def MaximumLeitnerBucketNumber(self):
-    """the maximum Leitner bucket number that a card can achieve"""
-    return self.__max_leitner_bucket_number
 
   @property
   def Statistics(self):
@@ -1252,64 +1310,92 @@ class TInvalidFlashcardStatsRecord(Exception):
     """the reason why this exception was generated (should be a string)"""
     return self.__reason
 
-def CreateFlashcardHashToLeitnerBucketMap(handler_setter_function, parser_crank_function):
-  """ Parse flashcards and construct a dictionary mapping flashcard hashes to zeros.
+def CreateFlashcardStubMap(handler_setter_function, parser_crank_function, buckets, now):
+  """ Parse flashcards and construct a dictionary mapping flashcard hashes to TFlashcardStubs.
       "Flashcards" are objects that have Hash() functions that return
-      hexadecimal hash codes as strings.  'handler_setter_function' is a unary
-      function returning nothing and taking a unary function that returns
-      nothing but takes a single flashcard as input.  (That is,
-      'handler_setter_function' has the type "(TFlashcard -> ()) -> ().")
-      'handler_setter_function' should take its function parameter and make it
-      the function that the flashcard parser invokes to process parsed
-      flashcards.  'parser_crank_function' is a nullary function that completely
-      executes the parser and returns nothing."""
-  hashes_to_buckets = {}
+      hexadecimal hash codes as strings.
+
+      This method expects these parameters:
+
+        handler_setter_function :: (TFlashcard -> None) -> None
+          a function that takes its function parameter and makes it the function
+          that the flashcard parser invokes to process parsed flashcards
+        parser_crank_function :: None -> None
+          a nullary function that completely executes the parser
+        buckets :: [TLeitnerBucket]
+          a list of TLeitnerBuckets
+        now :: numeric
+          a timestamp representing the present
+
+  """
+  hashes_to_stubs = {}
   def Handleカード(カード):
-    hashes_to_buckets[カード.Hash] = 0
+    stub = TFlashcardStub(カード.Hash)
+    hashes_to_stubs[stub.Hash] = stub
+    buckets[0].AddStub(stub, TFlashcardStub._NEVER_TOUCHED, now)
   handler_setter_function(Handleカード)
   parser_crank_function()
-  return hashes_to_buckets
+  return hashes_to_stubs
 
-def ApplyStatsLogToFlashcards(handler_setter_function, parser_crank_function, hashes_to_buckets, bucket_counts):
-  """ Parse flashcard performance log entries and adjust the Leitner buckets of the specified flashcards accordingly.
+def ApplyStatsToStubMap(handler_setter_function, parser_crank_function, hashes_to_stubs, buckets, now):
+  """ Parse flashcard performance log entries and adjust the TFlashcardStubs in the specified stub map accordingly.
       "Flashcards" are objects that have Hash() functions that return
-      hexadecimal hash codes as strings.  'handler_setter_function' is a unary
-      function returning nothing and taking a unary function that returns
-      nothing but takes a single log record as input.  (That is,
-      'handler_setter_function' has the type "(record -> ()) -> ().")
-      'handler_setter_function' should take its function parameter and make it
-      the function that the log parser invokes to process parsed records.
-      'parser_crank_function' is a nullary function that completely
-      executes the parser and returns nothing.  'hashes_to_buckets' is a
-      dictionary mapping flashcard hashes to their Leitner bucket numbers.
-      'bucket_counts' is a list of Leitner bucket flashcard counts.  This
-      function assumes that the maximum Leitner bucket number is
-      "len(bucket_counts) - 1".
+      hexadecimal hash codes as strings.
 
-      This function returns nothing but modifies the contents of
-      'hashes_to_buckets' and 'bucket_counts'.
+      This method expects these parameters:
+
+        handler_setter_function :: (stats-log-record -> None) -> None
+          a function that takes its function parameter and makes it the function
+          that the stats log parser invokes to process parsed stats records
+        parser_crank_function :: None -> None
+          a nullary function that completely executes the parser
+        hashes_to_stubs :: dict<str,TFlashcardStub>
+          a dictionary mapping flashcard hash hex strings to flashcard stubs;
+          see CreateFlashcardStubMap()
+        buckets :: [TLeitnerBucket]
+          a list of TLeitnerBuckets
+        now :: numeric
+          a timestamp representing the present
+
+      This function returns a pair containing the number of new cards and
+      the number of cards that are due for review.  It also modifies the
+      TFlashcardStubs within 'hashes_to_stubs' and the TLeitnerBuckets
+      within 'buckets'.
 
       This function raises TInvalidFlashcardStatsRecord if it processes an
-      invalid flashcard stats record."""
-  max_leitner_bucket = len(bucket_counts) - 1
+      invalid flashcard stats record.
+
+  """
+  num_new_cards = len(hashes_to_stubs)
+  max_leitner_bucket = len(buckets) - 1
   def HandleLogEntry(record):
+    nonlocal num_new_cards
     if len(record) != 3:
       raise TInvalidFlashcardStatsRecord(parser.Line, "record does not have three fields")
-    if record[1] in hashes_to_buckets:
+    stub = hashes_to_stubs.get(record[1], None)
+    if stub is not None:
+      try:
+        date_touched = float(record[0])
+      except ValueError:
+        raise TInvalidFlashcardStatsRecord(parser.Line, "timestamp field is not a float")
       try:
         num_retries = int(record[2])
       except ValueError:
         raise TInvalidFlashcardStatsRecord(parser.Line, "num_retries field is not an integer")
-      old_bucket = hashes_to_buckets[record[1]]
-      if num_retries == 0:
-        new_bucket = old_bucket + (1 if old_bucket < max_leitner_bucket else 0)
-      else:
-        new_bucket = 0
-      bucket_counts[old_bucket] -= 1
-      bucket_counts[new_bucket] += 1
-      hashes_to_buckets[record[1]] = new_bucket
+      old_bucket = stub.BucketIndex
+      new_bucket = (
+        old_bucket + (1 if old_bucket < max_leitner_bucket else 0)
+         if num_retries == 0
+         else 0
+       )
+      if stub.IsNewCard:
+        num_new_cards -= 1
+      buckets[old_bucket].RemoveStub(stub, now)
+      buckets[new_bucket].AddStub(stub, date_touched, now)
+      stub.SetBucketIndex(new_bucket)
   handler_setter_function(HandleLogEntry)
   parser_crank_function()
+  return (num_new_cards, sum(bucket.DueCardCount for bucket in buckets))
 
 class TCardDeckFactory(object):
   """ Instances of this class construct flashcard decks (TCardDeck objects).
@@ -1320,7 +1406,7 @@ class TCardDeckFactory(object):
       This class relies heavily on CreateFlashcardHashToLeitnerBucketMap() and
       ApplyStatsLogToFlashcards()."""
 
-  def __init__(self, flashcard_cf_file, new_cf_parser_cb, set_cf_handler_cb, stats_log_file, new_log_parser_cb, set_record_handler_cb, max_leitner_bucket):
+  def __init__(self, flashcard_cf_file, new_cf_parser_cb, set_cf_handler_cb, stats_log_file, new_log_parser_cb, set_record_handler_cb, buckets):
     """ Construct a new factory.  'flashcard_cf_file' is the path to the
         flashcard file.  'new_cf_parser_cb' is a function (() -> Parser)
         that constructs a new parser to parse flashcards in 'flashcard_cf_file'.
@@ -1329,15 +1415,15 @@ class TCardDeckFactory(object):
         function.  'stats_log_file' is the path to the stats log file.
         'new_log_parser_cb' and 'set_record_handler_cb' are similar to
         'new_cf_parser_cb' and 'set_cf_handler_cb' except that they operate
-        on log parsers.  'max_leitner_bucket' is the maximum Leitner
-        bucket number."""
+        on log parsers.  'buckets' is a list of TLeitnerBuckets."""
     self.__flashcard_cf_file = flashcard_cf_file
     self.__new_cf_parser_cb = new_cf_parser_cb
     self.__set_cf_handler_cb = set_cf_handler_cb
     self.__new_log_parser_cb = new_log_parser_cb
-    self.__max_leitner_bucket = max_leitner_bucket
+    self.__leitner_buckets = buckets
+    self.__now = time.time()
 
-    # First, construct a map of flashcard hashes to Leitner buckets.
+    # First, construct a map of flashcard hashes to flashcard stubs.
     parser = new_cf_parser_cb()
     def SetHandler(flashcard_handler):
       set_cf_handler_cb(parser, flashcard_handler)
@@ -1345,78 +1431,101 @@ class TCardDeckFactory(object):
       with open(flashcard_cf_file, "r") as f:
         parser.ParseStrings(f)
       parser.Finish()
-    hashes_to_buckets = CreateFlashcardHashToLeitnerBucketMap(SetHandler, ParserCrank)
-    self.__card_count = len(hashes_to_buckets)
-    bucket_counts = [0] * (max_leitner_bucket + 1)
-    bucket_counts[0] = self.__card_count
+    hashes_to_stubs = CreateFlashcardStubMap(SetHandler, ParserCrank, buckets, self.__now)
+    self.__card_count = len(hashes_to_stubs)
 
-    # Second, apply the stats file to the cards.
-    # This will change the cards' Leitner buckets.
-    self.__log_exists = True
+    # Second, apply the stats file to the stubs.
+    # This will change the Leitner buckets.
     parser = new_log_parser_cb()
     def SetHandler(record_handler):
       set_record_handler_cb(parser, record_handler)
     def ParserCrank():
       try:
-        with open(FlashcardsStatsLog, "r") as f:
+        with open(stats_log_file, "r") as f:
           parser.ParseStrings(f)
         parser.Finish()
       except IOError as e:
         if e.errno != errno.ENOENT:
           raise e
-        self.__log_exists = False
-    ApplyStatsLogToFlashcards(SetHandler, ParserCrank, hashes_to_buckets, bucket_counts)
-    self.__hashes_to_buckets = hashes_to_buckets
-    self.__bucket_counts = bucket_counts
+    self.__num_new_cards, self.__num_due_cards = ApplyStatsToStubMap(SetHandler, ParserCrank, hashes_to_stubs, buckets, self.__now)
+    assert self.__num_new_cards <= self.__num_due_cards # New cards are always due.
+    self.__hashes_to_stubs = hashes_to_stubs
     super().__init__()
 
-  def ConstructDeck(self, max_cards):
-    """ Sample up to 'max_cards' cards.  This will return an iterable collection
-        of flashcards."""
-    # Create TRandomSelectors for the Leitner buckets.
-    if max_cards < self.NumberOfCards and self.__log_exists:
-      selectors = []
-      max_bucket = 0
-      cards_left = max_cards
-      while cards_left > 0:
-        selectors.append(TRandomSelector(min(self.__bucket_counts[max_bucket], cards_left)))
-        cards_left -= self.__bucket_counts[max_bucket]
-        max_bucket += 1
-    else:
-      max_bucket = self.MaximumLeitnerBucket + 1
-      selectors = list(TRandomSelector(max_cards) for bucket in range(max_bucket))
+  def ConstructDeck(self, size, num_new_cards):
+    """ Get an iterable collection of randomly-sampled flashcards.
 
-    # Pass through the flashcard file and randomly pick cards.
-    def Handleカード(カード):
-      bucket = self.__hashes_to_buckets[カード.Hash]
-      if bucket < max_bucket and self.__bucket_counts[bucket]:
-        selectors[bucket].Add(カード)
+        If no cards are due, then this will return an iterable collection of
+        up to 'size' cards that are due soonest; otherwise, this will return
+        an iterable collection of all due cards.
+
+        New cards are always due.  Exactly 'num_new_cards' will be returned in
+        the iterable collection if possible.
+
+    """
+    # Adjust the parameters.
+    if size <= 0:
+      raise RuntimeError("size must be positive")
+    if num_new_cards < 0:
+      raise RuntimeError("num_new_cards must be positive or zero")
+    num_new_cards = min(num_new_cards, self.__num_new_cards)
+    if self.__num_due_cards == 0:
+      size = min(size, self.__card_count)
+      selection = []
+      def OfferCard(card):
+        heap_key = self.__now - self.__hashes_to_stubs[card.Hash].DueDate
+        if len(selection) < size:
+          heapq.heappush(selection, (heap_key, random.random(), id(card), card))
+        elif heap_key >= selection[0][0]:
+          heapq.heapreplace(selection, (heap_key, random.random(), id(card), card))
+      def YieldCards():
+        for _, _, _, card in selection:
+          yield card
+    else:
+      num_due_cards = max(min(size, self.__num_due_cards) - num_new_cards, 0)
+      new_card_selector = TRandomSelector(num_new_cards)
+      due_card_selector = TRandomSelector(num_due_cards)
+      def OfferCard(card):
+        stub = self.__hashes_to_stubs[card.Hash]
+        if stub.IsNewCard and num_new_cards != 0:
+          new_card_selector.Add(card)
+        elif stub.IsDue(self.__now) and num_due_cards != 0:
+          due_card_selector.Add(card)
+      def YieldCards():
+        return itertools.chain(new_card_selector, due_card_selector)
+
+    # Pass through the flashcard file and randomly pick cards according
+    # to the parameters.
     parser = self.__new_cf_parser_cb()
-    self.__set_cf_handler_cb(parser, Handleカード)
+    self.__set_cf_handler_cb(parser, OfferCard)
     with open(self.__flashcard_cf_file, "r") as f:
       parser.ParseStrings(f)
     parser.Finish()
 
     # Return the combined, shuffled results.
-    combined_results = TRandomSelector(max_cards)
-    for selector in selectors:
-      combined_results.ConsumeSequence(selector)
+    combined_results = TRandomSelector(self.__card_count)
+    combined_results.ConsumeSequence(YieldCards())
     return combined_results
 
   @property
-  def BucketCounts(self):
-    """a list of Leitner bucket counts"""
-    return list(self.__bucket_counts)
-
-  @property
-  def MaximumLeitnerBucket(self):
-    """the maximum Leitner bucket number"""
-    return self.__max_leitner_bucket
+  def Buckets(self):
+    """a list of Leitner buckets"""
+    return list(self.__leitner_buckets)
 
   @property
   def NumberOfCards(self):
     """the total number of flashcards in the flashcard pool"""
     return self.__card_count
+
+  @property
+  def NumberOfDueCards(self):
+    """the number of cards that are due for review"""
+    return self.__num_due_cards
+
+  @property
+  def NumberOfNewCards(self):
+    """the number of cards that have not been used in quizzes"""
+    return self.__num_new_cards
 
 # TODO Make the callbacks take a buffer parameter.
 def GenerateCardHTML(handler_url, session_token, title, remaining_time_secs,
@@ -1716,18 +1825,16 @@ class T言葉のフラッシュカードのパーサ(TConfigurationParser):
 
 QuizURL = "/"
 CurrentDeck = None
-CardCount = 0
 CurrentSession = None
 FlashcardsFile = None
 FlashcardsStatsLog = None
-MaxLeitnerBucket = None
+LeitnerBuckets = [0]      # list of per-bucket delays (in seconds); bucket zero is implicitly defined
 RemainingTimeSecs = 0
 
 ReversedCardOrientation = False
 
 @get(QuizURL)
 def Config():
-  global CardCount
   global CurrentSession
   CurrentSession = str(random.random())
 
@@ -1738,7 +1845,7 @@ def Config():
     FlashcardsStatsLog,
     lambda: TLogParser(None),
     lambda parser, handler: parser.SetRecordCb(handler),
-    MaxLeitnerBucket
+    [TLeitnerBucket(delay) for delay in LeitnerBuckets]
    )
   reversed_deck_factory = TCardDeckFactory(
     FlashcardsFile,
@@ -1747,31 +1854,53 @@ def Config():
     FlashcardsStatsLog,
     lambda: TLogParser(None),
     lambda parser, handler: parser.SetRecordCb(handler),
-    MaxLeitnerBucket
+    [TLeitnerBucket(delay) for delay in LeitnerBuckets]
    )
-  CardCount = deck_factory.NumberOfCards
 
   buf = io.StringIO()
   BeginHTML5(buf, title="言葉の試験 Setup")
-  buf.write("</head><body><p><h1>言葉の試験 Setup</h1></p><p>Card Count: ")
-  buf.write(str(CardCount))
-  buf.write("</p><p><table border='1'><caption>Leitner Bucket Distribution</caption><tr><th style='text-align: left'>Bucket Number</th>")
-  for bucket in range(deck_factory.MaximumLeitnerBucket + 1):
+  buf.write("</head><body><p><h1>言葉の試験 Setup</h1></p><p>Regular card orientation: ")
+  buf.write(str(deck_factory.NumberOfDueCards))
+  buf.write(" of ")
+  buf.write(str(deck_factory.NumberOfCards))
+  buf.write(" cards are due.  (")
+  buf.write(str(deck_factory.NumberOfNewCards))
+  buf.write(" are new.)<br />Reversed card orientation: ")
+  buf.write(str(reversed_deck_factory.NumberOfDueCards))
+  buf.write(" of ")
+  buf.write(str(reversed_deck_factory.NumberOfCards))
+  buf.write(" cards are due.  (")
+  buf.write(str(reversed_deck_factory.NumberOfNewCards))
+  buf.write(" are new.)</p><p><table border='1'><caption>Leitner Bucket Distribution (Cards Total / Cards Due)</caption><tr><th style='text-align: left'>Bucket Number</th>")
+  for bucket in range(len(deck_factory.Buckets)):
     buf.write("<td style='text-align: center'>" + str(bucket) + "</td>")
   buf.write("</tr><tr><th style='text-align: left'>Bucket Card Count</th>")
-  for bucket_count in deck_factory.BucketCounts:
-    buf.write("<td style='text-align: center'>" + str(bucket_count) + "</td>")
+  for bucket in deck_factory.Buckets:
+    buf.write("<td style='text-align: center'>")
+    if bucket.CardCount:
+      buf.write(str(bucket.CardCount) + ("/" + str(bucket.DueCardCount) if bucket.DueCardCount else ""))
+    else:
+      buf.write("&nbsp;")
+    buf.write("</td>")
   buf.write("</tr><tr><th style='text-align: left'>Bucket Card Count (Reversed)</th>")
-  for bucket_count in reversed_deck_factory.BucketCounts:
-    buf.write("<td style='text-align: center'>" + str(bucket_count) + "</td>")
-  buf.write("""</table></p><p><form method="post" action="{0}">
+  for bucket in reversed_deck_factory.Buckets:
+    buf.write("<td style='text-align: center'>")
+    if bucket.CardCount:
+      buf.write(str(bucket.CardCount) + ("/" + str(bucket.DueCardCount) if bucket.DueCardCount else ""))
+    else:
+      buf.write("&nbsp;")
+    buf.write("</td>")
+  buf.write("""</table></p><p><form method="post" action=\"""")
+  buf.write(QuizURL)
+  buf.write("""\">
 <fieldset><legend>Limits</legend><p>
 <label>Time:</label>
 <input type="text" id="時" name="hours" /><label for="時">時</label>
 <input type="text" id="分" name="minutes" /><label for="分">分</label>
 <input type="text" id="秒" name="seconds" /><label for="秒">秒</label>
 </p><p>
-<label>Maximum Cards:</label><input type="text" name="max_cards" />
+<label>Max deck size:</label><input type="text" name="size" /><br />
+<label>Max new cards:</label><input type="text" name="num_new_cards" />
 </p></fieldset>
 <fieldset><legend>Deck Options</legend><p>
 <label>Card Orientation:</label><br />
@@ -1780,13 +1909,13 @@ def Config():
 </p></fieldset>
 <input type="submit" value="始めましょう！" />
 <input type="hidden" name="method" value="configure" />
-<input type="hidden" name="session_token" value="{1}" />
-</form></p></body></html>""".format(QuizURL, CurrentSession))
+<input type="hidden" name="session_token" value=\"""")
+  buf.write(CurrentSession)
+  buf.write("""\" /></form></p></body></html>""")
   return buf.getvalue()
 
 @post(QuizURL)
 def HandlePost():
-  global CardCount
   global ReversedCardOrientation
   global CurrentDeck
   global CurrentSession
@@ -1822,15 +1951,17 @@ def HandlePost():
       FlashcardsStatsLog,
       lambda: TLogParser(None),
       lambda parser, handler: parser.SetRecordCb(handler),
-      MaxLeitnerBucket
+      [TLeitnerBucket(delay) for delay in LeitnerBuckets]
      )
     CurrentDeck = TCardDeck(
       deck_factory.ConstructDeck(
-        StrToInt(request.forms.max_cards, "max_cards")
-         if request.forms.max_cards
-         else deck_factory.NumberOfCards
-       ),
-      MaxLeitnerBucket
+        StrToInt(request.forms.size, "size")
+         if request.forms.size
+         else deck_factory.NumberOfCards,
+        StrToInt(request.forms.num_new_cards, "num_new_cards")
+         if request.forms.num_new_cards
+         else 0
+       )
      )
 
     # Finally, render the first card.
@@ -1858,7 +1989,6 @@ def HandlePost():
 def Main():
   global FlashcardsFile
   global FlashcardsStatsLog
-  global MaxLeitnerBucket
 
   parser = argparse.ArgumentParser(description="月詠は日本語を勉強するツールです。")
   parser.add_argument(
@@ -1909,10 +2039,13 @@ def Main():
     PrintErrorAndExit("The root's name should be 'server-configuration'.")
   if parser.Root.HasSettings:
     PrintErrorAndExit("The root node cannot have settings.")
+
+  delays_defined = False
+
   for section in parser.Root.YieldSections():
-    if not section.IsAttribute:
-      PrintErrorAndExit("Settings must be attributes.")
     if section.Name == "kotoba-flashcards-file":
+      if not section.IsAttribute:
+        PrintErrorAndExit("Settings must be attributes.")
       if FlashcardsFile is not None:
         PrintErrorAndExit("It has two 'kotoba-flashcards-file' attributes.")
       FlashcardsFile = EnsureAbsolutePath(section.Value, args.サーバの設定ファイル)
@@ -1921,6 +2054,8 @@ def Main():
       if not os.access(FlashcardsFile, os.R_OK):
         PrintErrorAndExit("The kotoba-flashcards-file '" + FlashcardsFile + "' cannot be read.")
     elif section.Name == "kotoba-flashcards-stats-log":
+      if not section.IsAttribute:
+        PrintErrorAndExit("Settings must be attributes.")
       if FlashcardsStatsLog is not None:
         PrintErrorAndExit("It has two 'kotoba-flashcards-stats-log' attributes.")
       FlashcardsStatsLog = EnsureAbsolutePath(section.Value, args.サーバの設定ファイル)
@@ -1929,21 +2064,23 @@ def Main():
           PrintErrorAndExit("The kotoba-flashcards-file '" + FlashcardsStatsLog + "' is not a file.")
         if not os.access(FlashcardsStatsLog, os.R_OK):
           PrintErrorAndExit("The kotoba-flashcards-file '" + FlashcardsStatsLog + "' cannot be read.")
-    elif section.Name == "kotoba-flashcards-max-leitner-bucket":
-      if MaxLeitnerBucket is not None:
-        PrintErrorAndExit("It has two 'kotoba-flashcards-max-leitner-bucket' attributes.")
-      try:
-        MaxLeitnerBucket = int(section.Value)
-      except ValueError:
-        PrintErrorAndExit("It has a non-numeric 'kotoba-flashcards-max-leitner-bucket' value: " + section.Value)
-      if MaxLeitnerBucket < 0:
-        PrintErrorAndExit("'kotoba-flashcards-max-leitner-bucket' is less than zero.")
+    elif section.Name == "kotoba-flashcards-delays":
+      if delays_defined:
+        PrintErrorAndExit("It has two 'kotoba-flashcards-delays' sections.")
+      delays_defined = True
+      if section.HasSections:
+        PrintErrorAndExit("The 'kotoba-flashcards-delays' section has subsections.")
+      for delay in section.Settings:
+        try:
+          delay = float(delay)
+        except ValueError:
+          PrintErrorAndExit("'kotoba-flashcards-delays' has a non-numeric delay: " + delay)
+        delay = int(delay * 86400)
+        if delay < 0:
+          PrintErrorAndExit("'kotoba-flashcards-delays' has a delay that is is less than zero.")
+        LeitnerBuckets.append(delay)
     else:
-      PrintErrorAndExit("One setting has an invalid name: " + section.Name)
-
-  # Set defaults.
-  if MaxLeitnerBucket is None:
-    MaxLeitnerBucket = 6
+      PrintErrorAndExit("A section has an invalid name: " + section.Name)
 
   # Start the server.
   run(host='localhost', port=ポート番号, debug=True)
