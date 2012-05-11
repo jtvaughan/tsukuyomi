@@ -1763,20 +1763,13 @@ class T言葉のフラッシュカードのパーサ(TConfigurationParser):
   """ This configuration file parser parses 言葉のフラッシュカード files.
       It passes each フラッシュカード to a client-supplied handler."""
 
-  def __init__(self, on_flashcard_handler, reverse_orientation=False):
+  def __init__(self, on_flashcard_handler):
     """ Construct a flashcard parser that passes each flashcard to the specified
-        unary handler.  If 'reverse_orientation' is True, then the 日本語 and
-        英語 sides will be swapped."""
+        unary handler."""
     self.__source = None
     self.__日本語 = None
     self.__英語 = None
     self.__handler = on_flashcard_handler
-    if reverse_orientation:
-      def ConstructFlashcard(日本語, 英語, source):
-        return T言葉のフラッシュカード(英語, 日本語, source)
-    else:
-      def ConstructFlashcard(日本語, 英語, source):
-        return T言葉のフラッシュカード(日本語, 英語, source)
     def SectionBeginHandler(section, parent):
       if parent is None:
         if section.Name != "言葉のフラッシュカード":
@@ -1791,7 +1784,7 @@ class T言葉のフラッシュカードのパーサ(TConfigurationParser):
       if self.__日本語 is not None:
         if self.__英語 is None:
           raise T言葉のフラッシュカードFormatError(self.Line, self.Column, "フラッシュカード must have an 英語")
-        self.__Handleカード(ConstructFlashcard(self.__日本語, self.__英語, self.__source))
+        self.__Handleカード(T言葉のフラッシュカード(self.__日本語, self.__英語, self.__source))
         self.__英語 = None
         self.__日本語 = None
       elif self.__source is not None:
@@ -1831,8 +1824,6 @@ FlashcardsStatsLog = None
 LeitnerBuckets = [0]      # list of per-bucket delays (in seconds); bucket zero is implicitly defined
 RemainingTimeSecs = 0
 
-ReversedCardOrientation = False
-
 @get(QuizURL)
 def Config():
   global CurrentSession
@@ -1840,16 +1831,7 @@ def Config():
 
   deck_factory = TCardDeckFactory(
     FlashcardsFile,
-    lambda: T言葉のフラッシュカードのパーサ(None, False),
-    lambda parser, handler: parser.SetカードHandler(handler),
-    FlashcardsStatsLog,
-    lambda: TLogParser(None),
-    lambda parser, handler: parser.SetRecordCb(handler),
-    [TLeitnerBucket(delay) for delay in LeitnerBuckets]
-   )
-  reversed_deck_factory = TCardDeckFactory(
-    FlashcardsFile,
-    lambda: T言葉のフラッシュカードのパーサ(None, True),
+    lambda: T言葉のフラッシュカードのパーサ(None),
     lambda parser, handler: parser.SetカードHandler(handler),
     FlashcardsStatsLog,
     lambda: TLogParser(None),
@@ -1859,22 +1841,16 @@ def Config():
 
   buf = io.StringIO()
   BeginHTML5(buf, title="言葉の試験 Setup")
-  buf.write("</head><body><p><h1>言葉の試験 Setup</h1></p><p>Regular card orientation: ")
+  buf.write("</head><body><p><h1>言葉の試験 Setup</h1></p><p>")
   buf.write(str(deck_factory.NumberOfDueCards))
   buf.write(" of ")
   buf.write(str(deck_factory.NumberOfCards))
   buf.write(" cards are due.  (")
   buf.write(str(deck_factory.NumberOfNewCards))
-  buf.write(" are new.)<br />Reversed card orientation: ")
-  buf.write(str(reversed_deck_factory.NumberOfDueCards))
-  buf.write(" of ")
-  buf.write(str(reversed_deck_factory.NumberOfCards))
-  buf.write(" cards are due.  (")
-  buf.write(str(reversed_deck_factory.NumberOfNewCards))
-  buf.write(" are new.)</p><p><table border='1'><caption>Leitner Bucket Distribution (Cards Total / Cards Due)</caption><tr><th style='text-align: left'>Bucket Number</th>")
+  buf.write(" are new.)</p><p><table border='1'><caption>Leitner Bucket Distribution</caption><tr><th style='text-align: left'>Bucket Number</th>")
   for bucket in range(len(deck_factory.Buckets)):
     buf.write("<td style='text-align: center'>" + str(bucket) + "</td>")
-  buf.write("</tr><tr><th style='text-align: left'>Bucket Card Count</th>")
+  buf.write("</tr><tr><th style='text-align: left'>Cards Count / Cards Due</th>")
   for bucket in deck_factory.Buckets:
     buf.write("<td style='text-align: center'>")
     if bucket.CardCount:
@@ -1882,32 +1858,20 @@ def Config():
     else:
       buf.write("&nbsp;")
     buf.write("</td>")
-  buf.write("</tr><tr><th style='text-align: left'>Bucket Card Count (Reversed)</th>")
-  for bucket in reversed_deck_factory.Buckets:
-    buf.write("<td style='text-align: center'>")
-    if bucket.CardCount:
-      buf.write(str(bucket.CardCount) + ("/" + str(bucket.DueCardCount) if bucket.DueCardCount else ""))
-    else:
-      buf.write("&nbsp;")
-    buf.write("</td>")
-  buf.write("""</table></p><p><form method="post" action=\"""")
+  buf.write("""</tr></table></p><p><form method="post" action=\"""")
   buf.write(QuizURL)
   buf.write("""\">
 <fieldset><legend>Limits</legend><p>
-<label>Time:</label>
-<input type="text" id="時" name="hours" /><label for="時">時</label>
-<input type="text" id="分" name="minutes" /><label for="分">分</label>
-<input type="text" id="秒" name="seconds" /><label for="秒">秒</label>
-</p><p>
-<label>Max deck size:</label><input type="text" name="size" /><br />
-<label>Max new cards:</label><input type="text" name="num_new_cards" />
-</p></fieldset>
-<fieldset><legend>Deck Options</legend><p>
-<label>Card Orientation:</label><br />
-<input type="radio" id="orientation_regular" name="card_orientation" value="regular" checked="checked" /><label for="orientation_regular">前は日本語、後ろは英語</label><br />
-<input type="radio" id="orientation_reversed" name="card_orientation" value="reversed" /><label for="orientation_reversed">前は英語、後ろは日本語</label>
-</p></fieldset>
-<input type="submit" value="始めましょう！" />
+<table><tr><th style="text-align:right"><label>Time:</label></th>
+<td><input type="text" id="時" name="hours" pattern="[0-9]*" /></td><td><label for="時">時</label></td></tr>
+<tr><td></td><td><input type="text" id="分" name="minutes" pattern="[0-9]*" /></td><td><label for="分">分</label></td></tr>
+<tr><td></td><td><input type="text" id="秒" name="seconds" pattern="[0-9]*" /></td><td><label for="秒">秒</label></td></tr>
+</table></p><p>
+<table>
+<tr><th style="text-align:right"><label>Max deck size:</label></th><td><input type="text" name="size" pattern="[0-9]*" title="the maximum number of due cards to show or the maximum deck size if no cards are due"/></td></tr>
+<tr><th style="text-align:right"><label>Max new cards:</label></th><td><input type="text" name="num_new_cards" pattern="[0-9]*" title="the maximum number of new cards to show" /></td></tr>
+</table></p></fieldset>
+<input type="submit" value="始めましょう！" autofocus="autofocus" />
 <input type="hidden" name="method" value="configure" />
 <input type="hidden" name="session_token" value=\"""")
   buf.write(CurrentSession)
@@ -1916,7 +1880,6 @@ def Config():
 
 @post(QuizURL)
 def HandlePost():
-  global ReversedCardOrientation
   global CurrentDeck
   global CurrentSession
   global RemainingTimeSecs
@@ -1938,15 +1901,10 @@ def HandlePost():
     RemainingTimeSecs += 60 * StrToInt(request.forms.minutes, "minutes")
     RemainingTimeSecs += StrToInt(request.forms.seconds, "seconds")
 
-    # Determine the card orientation.
-    if not request.forms.card_orientation:
-      abort(400, "no card orientation")
-    ReversedCardOrientation = (request.forms.card_orientation == "reversed")
-
     # Parse the flashcards file and create a deck from some of the cards.
     deck_factory = TCardDeckFactory(
       FlashcardsFile,
-      lambda: T言葉のフラッシュカードのパーサ(None, ReversedCardOrientation),
+      lambda: T言葉のフラッシュカードのパーサ(None),
       lambda parser, handler: parser.SetカードHandler(handler),
       FlashcardsStatsLog,
       lambda: TLogParser(None),
@@ -2192,8 +2150,6 @@ function setKanjiImage(url_text) {
     振り仮名producer.Finish()
     GenerateHTML5Ruby(振り仮名producer.Results, buf, "kanji", KanjiOnClickGenerator, KanjiOnMouseoverGenerator, "furigana", False)
     振り仮名がある = 振り仮名がある or any(ペア.振り仮名 for ペア in 振り仮名producer.Results)
-    if ReversedCardOrientation:
-      RenderSource(buf)
     return buf.getvalue()
   def GenerateBack():
     nonlocal 振り仮名がある
@@ -2203,8 +2159,6 @@ function setKanjiImage(url_text) {
     振り仮名producer.Finish()
     GenerateHTML5Ruby(振り仮名producer.Results, buf, "kanji", KanjiOnClickGenerator, KanjiOnMouseoverGenerator, "furigana", False)
     振り仮名がある = 振り仮名がある or any(ペア.振り仮名 for ペア in 振り仮名producer.Results)
-    if not ReversedCardOrientation:
-      RenderSource(buf)
     return buf.getvalue()
   def GenerateSelectors():
     buf = io.StringIO()
