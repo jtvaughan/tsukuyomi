@@ -66,20 +66,7 @@ Running
       including how many cards each bucket has and how many of those cards
       are due for review; and
 
-   4. options for configuring the quiz, including:
-
-      * a time limit (defaults to infinity);
-
-      * the maximum number of due cards to show in the quiz _or_ the maximum
-        number of cards to review in advance if there are no cards due ("max
-        deck size"; defaults to infinity);
-
-      * the maximum number of new cards to show in the quiz
-        ("max new cards"; defaults to infinity); and
-
-      * the source of 漢字 stroke order diagrams.
-
-      Most of these fields are optional.
+   4. options for configuring the quiz (see below).
 
 8. Enter your configuration preferences and click on the "始めましょう！" button at
    the bottom of the web page.  This will start the quiz.
@@ -91,32 +78,47 @@ Running
 
 10. The web page will display several buttons:
 
-   * **漢字の書き方を見せて**: This enables the 漢字 stroke order diagram display.
-     After you click this button, you may move your mouse over any 漢字 on the
-     card to display the 漢字's stroke order diagram underneath the card.
-     NOTE: If the stroke order diagram source you selected on the configuration
-     screen does not have a stroke order diagram for the 漢字, then the page
-     will render a broken image underneath the card.
+   1. **漢字の書き方を見せて**: This enables the 漢字 stroke order diagram display.
+      After you click this button, you may move your mouse over any 漢字 on the
+      card to display the 漢字's stroke order diagram underneath the card.
+      NOTE: If the stroke order diagram source you selected on the configuration
+      screen does not have a stroke order diagram for the 漢字, then the page
+      will render a broken image underneath the card.
 
-   * **振り仮名を見せて**: This enables the 振り仮名 (furigana) display.  漢字
-     annotated with 振り仮名 will display their 振り仮名 next to themselves.
-     (See the Flashcard Files section for information about 振り仮名
-     annotations.)  Additionally, this button's text will change to
-     "Hide 振り仮名"; clicking on it will hide the 振り仮名 annotations.
+   2. **振り仮名を見せて**: This enables the 振り仮名 (furigana) display.  漢字
+      annotated with 振り仮名 will display their 振り仮名 next to themselves.
+      (See the Flashcard Files section for information about 振り仮名
+      annotations.)  Additionally, this button's text will change to
+      "Hide 振り仮名"; clicking on it will hide the 振り仮名 annotations.
 
-   * **駄目だ**: Click this button if you answered the card incorrectly.
-     The server will record this failure and shuffle the card back into the
-     current deck for display later.
+   3. **駄目だ**: Click this button if you answered the card incorrectly.
+      The server will record this failure and shuffle the card back into the
+      current deck for display later.
 
-   * **やった！**: Click this button if you answered the card correctly.
-     The server will record this success and remove the card from the
-     current deck.
+   4. **やった！**: Click this button if you answered the card correctly.
+      The server will record this success and remove the card from the
+      current deck.
 
 11. The quiz ends when you answer all cards correctly or you run out of time.
     (Failed cards are shown repeatedly until you answer them correctly.)
     When the quiz ends, you will see a simple web page that says "Done!"
 
 12. If you want to quiz yourself again, go back to step (6).
+
+Quiz configuration settings include:
+
+* a time limit (defaults to infinity);
+
+* the maximum number of due cards to show in the quiz _or_ the maximum
+  number of cards to review in advance if there are no cards due ("max
+  deck size"; defaults to infinity);
+
+* the maximum number of new cards to show in the quiz
+  ("max new cards"; defaults to infinity); and
+
+* the source of 漢字 stroke order diagrams.
+
+Most of these settings are optional.
 
 
 

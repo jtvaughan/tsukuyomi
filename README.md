@@ -150,8 +150,8 @@ Tools
 月詠 provides two tools:
 
 * **言葉 Flashcards**: This web-facing tool starts a local web server that
-  serves two-sided flashcards in a simple
-  [Leitner-style](http://en.wikipedia.org/wiki/Leitner_system) quiz format.
+  serves two-sided flashcards in a simple quiz with a modified
+  [Leitner card scheduler](http://en.wikipedia.org/wiki/Leitner_system).
 * **漢字 Stroke Order Diagram Downloader**: This command line tool scans
   configuration files (such as flashcard files) and logs for 漢字 characters
   and downloads stroke order diagrams from one or more sources on the Internet.
