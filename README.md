@@ -21,10 +21,10 @@ in [Shinto](http://en.wikipedia.org/wiki/Shinto) mythology.
 Introduction
 ------------
 
-月詠 is a loose collection of web-facing tools for learning Japanese.
-It could, in principle, be tailored to help people learn any language,
-but its algorithms are specially designed for processing Japanese text.
-As mentioned above, 月詠 is designed to be useful but not necessarily
+月詠 is a loose collection of command line and web-facing tools for learning
+Japanese.  It could, in principle, be tailored to help people learn any
+language, but its algorithms are specially designed for processing Japanese
+text.  As mentioned above, 月詠 is designed to be useful but not necessarily
 easy to use for average computer users.  However, anyone who can
 run Python commands from terminals can use 月詠.
 
@@ -39,7 +39,7 @@ A few principles guide 月詠:
    be improved later.  Instead, focus on _solving problems_ with sensible,
    straightforward, correct code and ensuring that UIs are _functional_.
    Do not make applications more complex than they need to be.
-2. _Transparent Data Storage_: Application and user data should be
+2. _Transparent, Portable Data Storage_: Application and user data should be
    easy to parse and migrate to other applications.
 3. _Clarity_: Code and UIs should be thoroughly documented.
 4. _Freedom_: Open-source software should be truly open.  Anyone and any
@@ -52,12 +52,12 @@ In keeping with these principles, 月詠 features the following:
 1. 月詠 has no external dependencies other than the standard Python
    interpreter: You do not need to download and manage a mess of
    third-party libraries.
-2. 月詠 is not an Internet-facing application.  It is a
+2. 月詠 is not an Internet-facing application.  Its web-facing tools are
    single-[threaded](http://en.wikipedia.org/wiki/Thread_(computer_science\)),
    [blocking](http://en.wikipedia.org/wiki/Blocking_(computing\)),
    single-[session](http://en.wikipedia.org/wiki/Session_(computer_science\)),
-   local [web application](http://en.wikipedia.org/wiki/Web_application).
-   In fact, it is only a web application because web browsers are perfect
+   local [web applications](http://en.wikipedia.org/wiki/Web_application).
+   In fact, they are only web applications because web browsers are perfect
    front-ends for graphical applications.  In other words, is easy to
    design nice, functional UIs in
    [HTML5](http://en.wikipedia.org/wiki/HTML5),
@@ -69,32 +69,40 @@ In keeping with these principles, 月詠 features the following:
    and out-of-date documentation are treated as bugs.
 4. All data is read from and written to plain text files with
    well-documented, easy-to-parse formats.
-5. Aside from its underlying [web framework], 月詠 is organized into
-   a single Python source file.
-5. Unless noted otherwise, all of 月詠 has been released to the
+5. Aside from its underlying [web framework], the core
+   月詠 classes and functions are organized into a single Python source file.
+   Each tool has its own script file.
+6. Unless noted otherwise, all of 月詠 has been released to the
    [public domain](http://en.wikipedia.org/wiki/Public_domain).
    This means that the files are not copyrighted: You can download,
    distribute, modify, and use them any way you like.
 
 
-### Why 月詠 Was Written
+### Why Yet Another Learning Tool?
 
-Why did I, the author, write 月詠 even though there are other learning
-tools available, such as [Anki](http://ankisrs.net/) and
+Why am I, the author, writing 月詠 even though there are other free learning
+tools, such as [Anki](http://ankisrs.net/) and
 [Mnemosyne](http://www.mnemosyne-proj.org/)?
 
 1. Neither project adheres to all of the aforementioned principles.
-   I used Anki and Mnemosyne for a while but thought both were too
-   complex.  Both were designed to appeal to large, diverse audiences:
-   All I needed was a tool or two that I could use to learn Japanese.
-2. I despise using [SQLite](http://www.sqlite.org/) to
-   store and retrieve flashcards.  I wanted to be able to easily edit my
+   I used Anki and Mnemosyne for a while but thought Anki was too
+   complex and Mnemosyne was too generic.  Both are designed to appeal to
+   large, diverse audiences: All I need is a tool or two that I can
+   use to learn Japanese.
+2. Mnemosyne is almost dead.
+3. Anki is split across several repositories that are rarely synchronized.
+   I have tried in vain to load Anki decks created via the latest
+   Anki desktop release into the latest Android release on my tablet.
+   There should be one repository with synchronized updates to all
+   supported platforms.
+4. I despise using [SQLite](http://www.sqlite.org/) to
+   store and retrieve flashcards.  I want to be able to easily edit my
    flashcard files with a text editor.
-3. I want finer control over the way statistics are generated
-   and displayed.
-4. I want to write several different kinds of tools to aid my
-   language studies, not just flashcards.
-5. I like writing my own software.  I understand exactly how the software
+5. I want to use several different kinds of tools to aid my language studies,
+   not just flashcards.
+6. I want to separate flashcards from performance data.  The two are stored
+   in separate files.
+7. I like writing my own software.  I understand exactly how the software
    works and I can tailor it to fit my needs.  Besides, I think I can
    write decent software.
 
@@ -107,16 +115,16 @@ In keeping with the principle of minimalism, 月詠 has no external
 dependencies other than the standard Python libraries.  At the time
 this was written, 月詠 runs on the stable release of Python 3 (3.2).
 It has not been tested with other versions of Python or any interpreters
-other than CPython, the standard interpreter.
+other than [CPython](http://www.python.org), the standard interpreter.
 
 For those of you who are still stuck in Python 2.x land: Get over it.
 Python 3 is the present and the future.
 
-月詠 serves HTML5 web pages, so you will need to use a web browser that
-supports HTML5.  In particular, the browser should render
-ruby-annotated text properly, or else Japanese text with
-[furigana](http://en.wikipedia.org/wiki/Furigana) will be difficult
-to read.
+月詠 serves HTML5 web pages, so you will need to use
+[a web browser that supports HTML5](http://html5test.com/results/desktop.html).
+In particular, the browser should render ruby-annotated text properly, or else
+Japanese text with [furigana](http://en.wikipedia.org/wiki/Furigana) will be
+difficult to read.
 
 If the following text is rendered as a single line with a ton of
 parentheses (that is, the furigana does not render properly), then you
@@ -127,7 +135,7 @@ will need to use another web browser:
 Consider using [Google's Chrome browser](https://www.google.com/chrome),
 which natively supports furigana.
 
-It should go without saying that you need a Chinese or
+It should go without saying that you will need a Chinese or
 [Japanese font](http://www.wazu.jp/gallery/Fonts_Japanese.html)
 with [UTF-8](http://en.wikipedia.org/wiki/UTF-8) support.  If the above
 line of Japanese text renders as a bunch of garbled characters, then you
@@ -136,45 +144,26 @@ do not have such a font or it is not your browser's default
 
 
 
-Running 月詠
------------
+Tools
+-----
 
-1. Download 月詠 if you have not already done so.
+月詠 provides two tools:
 
-2. Open a console or terminal.
+* **言葉 Flashcards**: This web-facing tool starts a local web server that
+  serves two-sided flashcards in a simple
+  [Leitner-style](http://en.wikipedia.org/wiki/Leitner_system) quiz format.
+* **漢字 Stroke Order Diagram Downloader**: This command line tool scans
+  configuration files (such as flashcard files) and logs for 漢字 characters
+  and downloads stroke order diagrams from one or more sources on the Internet.
+  Other 月詠 tools can link to the downloaded stroke order diagrams instead of
+  those served by remote Internet servers to speed up web page rendering.
 
-3. Navigate to the directory containing the downloaded code.
+Each tool is executed differently.  Please refer to each tool's README file
+for instructions.
 
-4. Run the following command:
-
-   > `./tsukuyomi.py [port] [config-file]`
-
-   where
-
-   1. `[port]` is the port number that the 月詠 server will use; and
-   2. `[config-file]` is the path to a configuration file describing
-      the server's other properties.
-      (See the Configuration Files section below for more information.)
-
-   You should see something like this on your terminal:
-
-         Bottle v0.11.dev server starting up (using WSGIRefServer())...
-         Listening on http://localhost:8080/
-         Hit Ctrl-C to quit.
-
-   In this example, `port` is 8080.
-
-   The console or terminal will occasionally display diagnostic messages
-   ([HTTP](http://en.wikipedia.org/wiki/Hypertext_Transfer_Protocol) request
-   and response information) as you interact with 月詠 through your web browser.
-
-5. Open a web browser.
-
-6. Direct the web browser to the URL `http://127.0.0.1:[port]`, where
-   `[port]` is the same number that you used in the
-   aforementioned command.
-
-7. Enjoy!
+Please read the rest of this document before reading the tools' README files.
+In particular, you must understand 月詠's file formats before you can use
+the tools.
 
 
 
@@ -339,171 +328,12 @@ at the end of records, where `NEWLINE`s terminate records.
 
 
 
-Server Configuration Files
---------------------------
-
-月詠 expects the user to provide a special configuration file
-describing the server's properties.  The configuration file's root
-must be named "server-configuration" and can contain any of the following
-attributes:
-
-1. _kotoba-flashcards-file_ (required): This attribute specifies the
-   path to a configuration file containing 言葉 flashcards (see below).
-2. _kotoba-flashcards-file_: This optional attribute specifies the
-   path to a log file to which 月詠 will append performance data.
-3. _kotoba-flashcards-max-leitner-bucket_: This optional attribute
-   specifies the maximum Leitner bucket number that flashcards can
-   have.  This must be a natural number.
-
-Additionally, the root may contain the following sections:
-
-1. _kotoba-leitner-buckets_: This section describes properties about the
-   [Leitner buckets](http://en.wikipedia.org/wiki/Leitner_system) into
-   which 言葉 flashcards are sorted.
-
-   This section should only contain settings.  Each setting is a natural
-   number representing the number of days after which cards placed
-   into the corresponding Leitner bucket will be due for review.
-   The total number of Leitner buckets is the number of settings in
-   this section plus one.  (Bucket zero is always defined.  Its delay
-   is zero, which means that cards that the user fails to answer will
-   be immediately due for review.)
-
-   Although you can use any natural numbers you want as delays, it makes
-   sense to increase the delay as cards move into higher-numbered
-   Leitner buckets.  The following example might be a useful configuration:
-
->     "kotoba-leitner-buckets" {
->         "1";
->         "3";
->         "14";
->         "30";
->         "90";
->         "180"
->     }
-
-   In this example, the Leitner buckets' delays in increasing order by
-   Leitner bucket number are 0, 1, 3, 14, 30, 90, and 180 days.  There
-   are seven buckets in this example.
-
-All paths in the configuration file are either absolute or relative to
-the directory containing the configuration file.
-
-Here is a sample configuration file:
-
->     "server-configuration" {
-        "kotoba-flashcards-file" { "/日記/日本/日本語/言葉のフラッシュカード.txt" }
-        "kotoba-flashcards-max-leitner-bucket" { "4" }
-    }
-
-
-
-Other Files
------------
-
-
-### 言葉 Flashcards
-
-_言葉 flashcards_ are simple three-sided flashcards containing:
-
-1. 日本語：a word, phrase, sentence, or passage written in Japanese;
-2. 英語：the English translation of the 日本語 part (possibly with
-   additional notes or translation aids); and
-3. `Source`：the source of the flashcard (e.g., a friend, 先生, or yourself)
-
-There is nothing stopping you from using these flashcards as regular
-three-sided flashcards: You can put anything you want into the three
-sides.  However, the algorithms and UI associated with these flashcards
-are written to interpret the sides as described above.  (NOTE: 英語 does
-not have to be written in English.)
-
-言葉 flashcards are stored within configuration files.  Each file must
-follow these rules:
-
-1. The root must be named "言葉のフラッシュカード".
-2. The root must contain zero or more sections called _source sections_.
-3. Each source section must contain zero or more attributes called
-   _flashcard sections_.
-4. Neither source sections nor the root may contain settings.
-5. Flashcard sections may not have empty values.  (But flashcard sections'
-   values may be empty strings.)
-
-A 言葉 flashcard is constructed as follows:
-
-1. The `Source` side is the name of the source section containing
-   the flashcard.
-2. The 日本語 side is the name of the flashcard section corresponding to
-   the 言葉 flashcard.
-3. The 英語 side is the value of the flashcard section corresponding to
-   the 言葉 flashcard.
-
-For example, the 言葉 flashcard file
-
->     "言葉のフラッシュカード" {
-        "Japanese class" {
-          "私はジョーダンヴァンです。よろしくお願いします。" { "I am Joodan Van.  Nice to meet you. (丁寧語)" }
-        "オーストラリア人です。" { "[The subject is] Australian." }
-        }
-        "もとひろさん" {
-          "お手洗いはどこですか。" { "Where is the bathroom? (polite)" }
-        }
-    }
-
-defines three 言葉 flashcards:
-
-1. 日本語：私はジョーダンヴァンです。よろしくお願いします。  
-   英語：I am Joodan Van.  Nice to meet you. (丁寧語)  
-   Source：Japanese class
-
-2. 日本語：オーストラリア人です。  
-   英語：[The subject is] Australian.  
-   Source：Japanese class
-
-3. 日本語：お手洗いはどこですか。  
-   英語：Where is the bathroom? (polite)  
-   Source：もとひろさん
-
-月詠 provides an easy way to annotate Japanese text within 言葉 flashcards.
-If a set of [kanji](http://en.wikipedia.org/wiki/Kanji) characters is
-followed by a matching pair of parentheses, then the text within the
-parentheses will be rendered as the kanji characters'
-[furigana](http://en.wikipedia.org/wiki/Furigana).  For example:
-
-> ## 今日(きょう)レストランに行って、友(とも)達(だち)と食(しょく)事(じ)をして、たくさんお酒を飲みました。(Note that this text isn't furigana even though it's inside matching parentheses.)今晩家へ(This isn't furigana, either.)帰(かえ)ります。酒(酒(さけ))
-
-produces this furigana-annotated text:
-
-> ## <ruby>今日<rt>きょう</rt></ruby>レストランに行って、<ruby>友<rt>とも</rt></ruby><ruby>達<rt>だち</rt></ruby>と<ruby>食<rt>しょく</rt></ruby><ruby>事<rt>じ</rt></ruby>をして、たくさんお酒を飲みました。(Note that this text isn't furigana even though it's inside matching parentheses.)今晩家へ(This isn't furigana, either.)<ruby>帰<rt>かえ</rt></ruby>ります。<ruby>酒<rt>酒(さけ)</rt></ruby>
-
-Notice:
-
-1. Matching parentheses only denote furigana when they follow one or more consecutive kanji characters.  Matching parentheses appearing anywhere else
-are treated as part of the regular flow of text.
-2. Furigana annotations do not work within furigana annotations.
-
-
-### 言葉 Flashcards Performance Log
-
-The user's performance with 言葉 flashcards will be recorded if the server's
-configuration file contains a valid `kotoba-flashcards-stats-log` attribute
-(see above).  Each record has the following fields (in left-to-right order):
-
-1. the timestamp representing the end of the quiz that generated the record;
-2. the SHA-1 hash of the flashcard for which the record was created; and
-3. the number of times the user had to revisit the card before he successfuly
-   answered it.
-
-New records are appended to the log file.  If the log file does not exist,
-then 月詠 will create it.
-
-
-
 Repository Layout
 -----------------
 
-Aside from its underlying [web framework], 月詠 is a single Python file,
-`tsukuyomi.py`.  The major code sections are delimited by wide
-horizontal rules.
+Aside from its underlying [web framework], the core 月詠 algorithms reside
+in a single Python file, `tsukuyomi.py`.  The major code sections are delimited
+by wide horizontal rules.  Each tool resides in its own Python source file.
 
 
 

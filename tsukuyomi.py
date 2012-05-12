@@ -31,6 +31,7 @@ import random
 import sys
 import time
 import urllib.parse
+import urllib.request
 
 if __name__ == "__main__":
   sys.path = [os.path.realpath(__file__)] + sys.path
@@ -49,6 +50,85 @@ def EnsureAbsolutePath(path, base):
       otherwise, it joins it to 'base'.  'base' must be an absolute path."""
   assert os.path.isabs(base)
   return path if os.path.isabs(path) else os.path.join(base, path)
+
+def EnsureAccessibleAbsoluteDirectoryPath(path, base, perms, path_title=None, error_code=2):
+  """ Convert a path into an absolute path and ensure that it refers to a directory with the specified permissions.
+      This function expects the following parameters:
+
+        path :: str
+          The path to convert and check.
+        base :: str
+          An absolute path.  If 'path' is not absolute, then it is joined to
+          this absolute path.
+        perms :: int
+          A combination of os.access() flags joined by bitwise OR.
+
+      The following parameters are optional:
+
+        path_title :: str
+          A name for the file or setting associated with 'path'.  This becomes
+          part of error messages printed by this function.  If this is None
+          (the default), then no name is used: Error messages will contain
+          the value of 'path' instead.
+        error_code :: int
+          The error code that the program will return when this function
+          terminates it.  This function only terminates the program if
+          'path' has problems.
+
+    """
+  path = EnsureAbsolutePath(path, base)
+  def PrintErrorAndExit(message_stub):
+    sys.stderr.write("すみません、" + (path_title if path_title is not None else path) + message_stub + "\n")
+    sys.exit(error_code)
+  if not os.path.isdir(path):
+    PrintErrorAndExit("はディレクトリじゃありません。")
+  if not os.access(path, perms):
+    PrintErrorAndExit(" does not have the expected access permissions.")
+  return path
+
+def EnsureAccessibleAbsoluteFilePath(path, base, perms, path_title=None, error_code=2):
+  """ Convert a path into an absolute path and ensure that it refers to a file with the specified permissions.
+      This function expects the following parameters:
+
+        path :: str
+          The path to convert and check.
+        base :: str
+          An absolute path.  If 'path' is not absolute, then it is joined to
+          this absolute path.
+        perms :: int
+          A combination of os.access() flags joined by bitwise OR.
+
+      The following parameters are optional:
+
+        path_title :: str
+          A name for the file or setting associated with 'path'.  This becomes
+          part of error messages printed by this function.  If this is None
+          (the default), then no name is used: Error messages will contain
+          the value of 'path' instead.
+        error_code :: int
+          The error code that the program will return when this function
+          terminates it.  This function only terminates the program if
+          'path' has problems.
+
+    """
+  path = EnsureAbsolutePath(path, base)
+  def PrintErrorAndExit(message_stub):
+    sys.stderr.write("すみません、" + (path_title if path_title is not None else path) + message_stub + "\n")
+    sys.exit(error_code)
+  if not os.path.isfile(path):
+    PrintErrorAndExit("はファイルじゃありません。")
+  if not os.access(path, perms):
+    PrintErrorAndExit(" does not have the expected access permissions.")
+  return path
+
+def StrToInt(text, name):
+  """ Convert a string to an integer.  This is meant to be invoked while
+      servicing an HTTP request.  'text' is the string that will be converted.
+      'name' is a descriptive title for the converted value."""
+  try:
+    return int(text) if text else 0
+  except ValueError:
+    abort(400, name + " is not an integer: " + str(text))
 
 
 
@@ -956,8 +1036,8 @@ class T言葉と振り仮名Producer(object):
     return self.__results
 
 def GenerateHTML5Ruby(言葉と振り仮名sequence, buf, kanji_class,
- kanji_onclick_generator, kanji_onmouseover_generator, 振り仮名のクラス,
- 振り仮名を見える=True):
+ kanji_onclick_generator, kanji_onmouseover_generator,
+ kanji_onmouseout_generator, 振り仮名のクラス, 振り仮名を見える=True):
   """ Write HTML5 ruby-annotated text from the specified iterable of
       T言葉と振り仮名 into the specified buffer.  振り仮名のクラス should be a
       valid CSS class name: It will be the value of each rt tag's
@@ -968,30 +1048,352 @@ def GenerateHTML5Ruby(言葉と振り仮名sequence, buf, kanji_class,
   visible = ('" style="visibility:visible;">' if 振り仮名を見える else '" style="visibility:hidden;">')
   rt_start = '<rp class="' + 振り仮名のクラス + visible + ' (</rp><rt class="' + 振り仮名のクラス + visible
   rt_end = '<rp class="' + 振り仮名のクラス + visible + ') </rp></rt></ruby>'
+
+  def Write漢字(字):
+    buf.write(
+      '<span class=\"' + kanji_class +
+      '" onclick="' + kanji_onclick_generator(字) +
+      ('" onmouseover="' + kanji_onmouseover_generator(字) if kanji_onmouseover_generator is not None else '') +
+      ('" onmouseout="' + kanji_onmouseout_generator(字) + '">' if kanji_onmouseout_generator is not None else '">') +
+      字 + '</span>'
+     )
+
   for ペア in 言葉と振り仮名sequence:
     if ペア.振り仮名:
       buf.write("""<ruby>""")
       for 字 in ペア.言葉:
-        buf.write(
-          '<span class=\"' + kanji_class +
-          '" onclick="' + kanji_onclick_generator(字) +
-          ('" onmouseover="' + kanji_onmouseover_generator(字) + '">' if kanji_onmouseover_generator is not None else '">') +
-          字 + '</span>'
-         )
+        assert ord(字) in KANJI_RANGE
+        Write漢字(字)
       buf.write(rt_start)
       buf.write(ペア.振り仮名)
       buf.write(rt_end)
     else:
       for 字 in ペア.言葉:
-        if ord(字) in KANJI_RANGE:
-          buf.write(
-            '<span class=\"' + kanji_class +
-            '" onclick="' + kanji_onclick_generator(字) +
-            ('" onmouseover="' + kanji_onmouseover_generator(字) + '">' if kanji_onmouseover_generator is not None else '">') +
-            字 + '</span>'
-           )
-        else:
-          buf.write(字)
+        (Write漢字 if ord(字) in KANJI_RANGE else buf.write)(字)
+
+
+
+################################################################################
+# Functions for processing stroke order diagram configuration files
+################################################################################
+
+class TStrokeOrderDiagramFSInfo(object):
+
+  def __init__(self, 設定ファイルのパス):
+    # Flags and default settings
+    self.__設定ファイル = []
+    self.__タイムアウト = None
+    self.__ログファイル = []
+    configuration_files_specified = False
+    self.__enabled_sources = []
+    enabled_sources_specified = False
+    self.__image_directory = None
+    log_files_specified = False
+    self.__設定ファイルのディレクトリ = os.path.abspath(os.path.dirname(設定ファイルのパス))
+
+    # Parse the configuration file.
+    def ProcessSection(section, パス名, PrintErrorAndExit):
+      nonlocal configuration_files_specified
+      nonlocal enabled_sources_specified
+      nonlocal log_files_specified
+
+      if section.Name == "configuration-files":
+        if section.HasSections:
+          PrintErrorAndExit("configuration-files cannot have subsections.")
+        if configuration_files_specified:
+          PrintErrorAndExit("configuration-files must be specified once.")
+        configuration_files_specified = True
+        for 設定ファイルのパス名 in section.Settings:
+          self.__設定ファイル.append(os.path.join(self.__設定ファイルのディレクトリ, 設定ファイルのパス名))
+
+      elif section.Name == "enabled-sources":
+        if section.HasSections:
+          PrintErrorAndExit("enabled-sources cannot have subsections.")
+        if enabled_sources_specified:
+          PrintErrorAndExit("enabled-sources must be specified once.")
+        enabled_sources_specified = True
+        for source in section.Settings:
+          if source not in RemoteSources:
+            PrintErrorAndExit("This image source is not known: " + source)
+          self.__enabled_sources.append(source)
+
+      elif section.Name == "image-directory":
+        if not section.IsAttribute:
+          PrintErrorAndExit("image-directory must be an attribute.")
+        if self.__image_directory is not None:
+          PrintErrorAndExit("image-directory must be specified once.")
+        self.__image_directory = EnsureAccessibleAbsoluteDirectoryPath(section.Value, self.__設定ファイルのディレクトリ, os.R_OK, path_title="image-directory")
+
+      elif section.Name == "log-files":
+        if section.HasSections:
+          PrintErrorAndExit("log-files cannot have subsections.")
+        if log_files_specified:
+          PrintErrorAndExit("log-files must be specified once.")
+        log_files_specified = True
+        for ログファイルのパス名 in section.Settings:
+          self.__ログファイル.append(os.path.join(self.__設定ファイルのディレクトリ, ログファイルのパス名))
+
+      elif section.Name == "timeout":
+        if not section.IsAttribute:
+          PrintErrorAndExit("timeout must be an attribute.")
+        if self.__タイムアウト is not None:
+          PrintErrorAndExit("timeout must be specified once.")
+        try:
+          self.__タイムアウト = int(section.Value)
+        except ValueError:
+          PrintErrorAndExit("timeout is not a number: " + section.Value)
+
+    ツールの設定ファイルを分析する(設定ファイルのパス, "image-settings", False, ProcessSection)
+
+    # Validate settings.
+    if not enabled_sources_specified and (self.__設定ファイル or self.__ログファイル):
+      sys.stderr.write("すみません、you must enable at least one source in the 設定ファイル.")
+      sys.exit(2)
+    self.__image_directory = os.path.join(self.__設定ファイルのディレクトリ, self.__image_directory)
+    EnsureIsImageDirectory(self.__image_directory)
+    if self.__タイムアウト is None:
+      self.__タイムアウト = 30
+    super().__init__()
+
+  @property
+  def 設定ファイル(self):
+    return self.__設定ファイル
+
+  @property
+  def 設定ファイルのディレクトリ(self):
+    return self.__設定ファイルのディレクトリ
+
+  @property
+  def タイムアウト(self):
+    return self.__タイムアウト
+
+  @property
+  def ログファイル(self):
+    return self.__ログファイル
+
+  @property
+  def EnabledSources(self):
+    return self.__enabled_sources
+
+  @property
+  def ImageDirectory(self):
+    return self.__image_directory
+
+
+
+################################################################################
+# Functions for downloading 漢字 stroke order diagrams from remote sources
+################################################################################
+
+def WriteDiagramFile(データ, ファイルのパス名):
+  """ Write the bytes represented by データ to a new file at the path ファイルのパス名.
+      The file must not already exist.  This will delete the file if an IO
+      error occurs."""
+  assert not os.path.exists(ファイルのパス名)
+  try:
+    with データ as remote_data:
+      with open(ファイルのパス名, "wb") as f:
+        f.write(データ.read())
+  except Exception as e:
+    if os.path.exists(ファイルのパス名):
+      os.unlink(ファイルのパス名)
+    raise e
+
+def GetJishoDotOrgURL(漢字):
+  """ Get a URL string for the specified 漢字's stroke order diagram from jisho.org."""
+  assert len(漢字) == 1
+  assert ord(漢字) in KANJI_RANGE
+  return "http://jisho.org/static/images/stroke_diagrams/" + str(ord(漢字)) + "_frames.png"
+
+def DownloadJishoDotOrgDiagram(漢字, ファイルのパス名, タイムアウト):
+  """ Download the stroke order diagram for the specified 漢字 from jisho.org.
+      The image will be stored in the path specified by ファイルのパス名.
+      The download will timeout after タイムアウト seconds."""
+  WriteDiagramFile(urllib.request.urlopen(GetJishoDotOrgURL(漢字), timeout=タイムアウト), ファイルのパス名)
+
+def GetSaigaJPURL(漢字):
+  """ Get a URL string for the specified 漢字's stroke order diagram from saiga-jp.com."""
+  assert len(漢字) == 1
+  assert ord(漢字) in KANJI_RANGE
+  return "http://www.saiga-jp.com/dic/img/stroke/" + urllib.parse.quote(漢字).replace('%', '').lower() + ".gif"
+
+def DownloadSaigaJPDiagram(漢字, ファイルのパス名, タイムアウト):
+  """ Download the animated stroke order diagram for the specified 漢字 from saiga-jp.com.
+      The image will be stored in the path specified by ファイルのパス名.
+      The download will timeout after タイムアウト seconds."""
+  WriteDiagramFile(urllib.request.urlopen(GetSaigaJPURL(漢字), timeout=タイムアウト), ファイルのパス名)
+
+def GetSLJFAQURL(漢字):
+  """ Get a URL string for the specified 漢字's stroke order diagram from sljfaq.org."""
+  assert len(漢字) == 1
+  assert ord(漢字) in KANJI_RANGE
+  return "http://kanji.sljfaq.org/kanjivg/memory.cgi?c=" + hex(ord(漢字))[2:]
+
+def DownloadSLJFAQDiagram(漢字, ファイルのパス名, タイムアウト):
+  """ Download the stroke order diagram for the specified 漢字 from kanji.sljfaq.org.
+      The image will be stored in the path specified by ファイルのパス名.
+      The download will timeout after タイムアウト seconds."""
+  WriteDiagramFile(urllib.request.urlopen(GetSLJFAQURL(漢字), timeout=タイムアウト), ファイルのパス名)
+
+"""a dictionary mapping stroke order diagram sources to their download handlers and file extensions"""
+RemoteSources = {
+  "jisho.org": (DownloadJishoDotOrgDiagram, GetJishoDotOrgURL, "jpg"),
+  "saiga-jp.com": (DownloadSaigaJPDiagram, GetSaigaJPURL, "gif"),
+  "sljfaq.org": (DownloadSLJFAQDiagram, GetSLJFAQURL, "png")
+ }
+
+
+
+################################################################################
+# Functions for accessing 漢字 stroke order diagrams locally
+################################################################################
+
+""" This is the start of URL paths for 漢字 stroke order diagrams.  Clients that
+    need to access locally-stored stroke order diagrams should access the
+    diagrams through this path.  See GetStrokeOrderDiagramURL()."""
+StrokeOrderDiagramURLBase = "/images/"
+
+def ConstructStrokeOrderDiagramPath(漢字, image_directory, source):
+  """ Get a string representing the path to the stroke order diagram for the specified 漢字 from the specified source.
+      The file might not exist."""
+  assert source in RemoteSources
+  return os.path.join(image_directory, source, 漢字 + os.extsep + RemoteSources[source][2])
+
+def EnsureIsImageDirectory(image_directory):
+  """ Terminate the program if the specified path does not refer to an image directory."""
+  if not os.path.isdir(image_directory):
+    sys.stderr.write("image directory path does not refer to a directory: " + image_directory + "\n")
+    sys.exit(3)
+
+def GetStrokeOrderDiagramSources(image_directory):
+  """ Get a list of sources from which 漢字 stroke order diagrams were downloaded.
+      'image_directory' must be a path to a root image directory that was
+      previously managed by the download-kanji-images.py tool."""
+  EnsureIsImageDirectory(image_directory)
+  sources = os.listdir(image_directory)
+  for source in sources:
+    if not os.path.isdir(os.path.join(image_directory, source)):
+      sys.stderr.write("image directory is corrupted: " + image_directory + ": " + source + " is not a directory\n")
+      sys.exit(3)
+    if source not in RemoteSources:
+      sys.stderr.write("image directory is corrupted: " + image_directory + ": " + source + " is not a recognized remote source\n")
+      sys.exit(3)
+  return sources
+
+def GetLocalStrokeOrderDiagramPaths(漢字, image_directory, enabled_sources):
+  """ Get a list of paths to locally-stored stroke order diagrams for the specified 漢字 character.
+      This function expects the following parameters:
+
+        漢字 :: str
+          A single-character string containing a 漢字 character.
+        image_directory :: str
+          A path to the root image directory.  This directory must have been
+          managed by the download-kanji-images.py tool.
+        enabled_sources :: list<str>
+          A list of enabled image sources.  This function will only look for
+          kanji stroke order diagrams downloaded from these sources.
+
+  """
+  assert len(漢字) == 1
+  assert ord(漢字) in KANJI_RANGE
+  local_sources = set(GetStrokeOrderDiagramSources(image_directory)) ^ set(enabled_sources)
+  漢字 = 漢字 + os.extsep
+  パス名 = []
+  for source in local_sources:
+    パス = GetStrokeOrderDiagramPath(漢字, image_directory, source)
+    if パス is not False:
+      パス名.append(パス)
+  return パス名
+
+def GetStrokeOrderDiagramPath(漢字, image_directory, source):
+  """ Get the path to a stroke order diagram from the specified source for the specified 漢字.
+      This function expects the following parameters:
+
+        漢字 :: str
+          A single-character string containing a 漢字 character.
+        image_directory :: str
+          A path to the root image directory.  This directory must have been
+          managed by the download-kanji-images.py tool.
+        source :: str
+          A stroke order diagram source.
+
+      This function returns the path to the stroke order diagram if it is found.
+      Otherwise, this function returns False.
+  """
+  assert len(漢字) == 1
+  assert ord(漢字) in KANJI_RANGE
+  assert source in RemoteSources
+
+  パス = ConstructStrokeOrderDiagramPath(漢字, image_directory, source)
+  return パス if os.path.isfile(パス) else False
+
+def GetStrokeOrderDiagramURL(漢字, image_directory, source):
+  """ Get a URL to the stroke order diagram from the specified source for the specified 漢字.
+      This function expects the following parameters:
+
+        漢字 :: str
+          A single-character string containing a 漢字 character.
+        image_directory :: str
+          A path to the root image directory.  This directory must have been
+          managed by the download-kanji-images.py tool.
+        source :: str
+          A stroke order diagram source.
+
+      This function returns a string representing a URL.  The URL will be the
+      contatenation of the string "/images/", the source (URL quoted,
+      UTF-8 encoding), a "/", and the string representation of the integral
+      value of 漢字 (UTF-8 encoding) if there is a local stroke order diagram
+      for the 漢字.  If no local stroke order diagram exists for the specified
+      漢字 from the specified source, then the returned URL will refer to a
+      remote stroke order diagram from the specified source.
+  """
+  assert len(漢字) == 1
+  assert ord(漢字) in KANJI_RANGE
+  assert source in RemoteSources
+
+  パス = GetStrokeOrderDiagramPath(漢字, image_directory, source)
+  return (
+    RemoteSources[source][1](漢字)
+     if パス is False
+     else "/images/" + urllib.parse.quote(source) + "/" + str(ord(漢字))
+   )
+
+def ServeStrokeOrderDiagram(漢字, image_directory, source):
+  """ Serve the locally-stored stroke order diagram for the specified 漢字.
+      This function expects these parameters:
+
+        漢字 :: str
+          This is a string representation of the Unicode code point for the
+          漢字 whose stroke order diagram will be served.
+        image_directory :: str
+          A path to the root image directory.  This directory must have been
+          managed by the download-kanji-images.py tool.  This can be None.
+        source :: str
+          A stroke order diagram source.  This can be None.
+
+      This function must be invoked while handling a GET request.
+
+      If all of the parameters are valid, then this will serve the stroke
+      order diagram for the specified 漢字: The return value will be the
+      value returned by Bottle's static_file() function.  If either
+      'image_directory' or 'source' is None but 漢字 is valid, then this
+      function will return the empty string.  Otherwise, an HTTP error will
+      be generated.
+  """
+  try:
+    漢字 = chr(int(漢字))
+  except Exception as e:
+    abort(400, "invalid 漢字 encoding")
+  if len(漢字) != 1:
+    abort(400, "not a single-character 漢字")
+  if ord(漢字) not in KANJI_RANGE:
+    abort(400, "not 漢字")
+  data = ""
+  if image_directory is not None and source is not None:
+    local_path = GetStrokeOrderDiagramPath(漢字, image_directory, source)
+    if local_path is not False:
+      data = static_file(os.path.basename(local_path), os.path.dirname(local_path))
+  return data
 
 
 
@@ -1527,36 +1929,44 @@ class TCardDeckFactory(object):
     """the number of cards that have not been used in quizzes"""
     return self.__num_new_cards
 
-# TODO Make the callbacks take a buffer parameter.
 def GenerateCardHTML(handler_url, session_token, title, remaining_time_secs,
  head_creator, front_content_creator, back_content_creator, selectors_creator,
  stats_creator, bottom_creator):
   """ Construct a string containing a complete HTML document for displaying a
       flashcard.  The parameters are:
 
-        handler_url :: str -- the URL that will handle form submissions
-        session_token :: str -- some value identifying the session
-        title :: string -- the HTML document's title
-        remaining_time_secs :: int -- the number of seconds left in the quiz or
-                                      0 if there is no timeout
-        head_creator :: () => string -- nullary function that returns HTML
-                                        content to go in the document's
-                                        head section (can be None)
-        front_content_creator :: () => string -- nullary function that returns
-                                                 HTML content for the front
-                                                 of the card
-        back_content_creator :: () => string -- nullary function that returns
-                                                HTML content for the back of
-                                                the card
-        selectors_creator :: () => string -- nullary function that returns
-                                             HTML content producing additional
-                                             buttons or content to appear
-                                             below the back of the card but
-                                             above the answer buttons (may
-                                             be None)
-        stats_creator :: () => string -- nullary function that returns HTML
-                                         content to appear in the stats area
-                                         of the card
+        handler_url :: str
+          This is the URL that will handle form submissions.
+        session_token :: str
+          This is some value identifying the session.
+        title :: string
+          This is the HTML document's title.
+        remaining_time_secs :: int
+          This is the number of seconds left in the quiz or 0 if there is
+          no timeout.
+        head_creator :: (StringIO) => None
+          This is a unary function that writes HTML to the specified StringIO
+          buffer.  The HTML will show up in the generated page's <head> section.
+          This can be None.
+        front_content_creator :: (StringIO) => None
+          This is a unary function that writes HTML to the specified StringIO
+          buffer.  The HTML will show up in the <div> representing the front
+          of the card.
+        back_content_creator :: (StringIO) => None
+          This is a unary function that writes HTML to the specified StringIO
+          buffer.  The HTML will show up in the <div> representing the back
+          of the card.
+        selectors_creator :: (StringIO) => None
+          This is a unary function that writes HTML to the specified StringIO
+          buffer.  The HTML will appear after the back of the card but before
+          the answer buttons.  This can be None.
+        stats_creator :: (StringIO) => None
+          This is a unary function that writes HTML to the specified StringIO
+          buffer.  The HTML will appear in the <div> representing the
+          stats area.
+        bottom_creator :: (StringIO) => None
+          This is a unary function that writes HTML to the specified StringIO
+          buffer.  The HTML will appear after the card.  This can be None.
 
       The produced document will send POSTs to handler in these situations:
 
@@ -1640,7 +2050,7 @@ div.selectors {
 }
 </style>""")
   if head_creator is not None:
-    buf.write(head_creator())
+    head_creator(buf)
   if remaining_time_secs > 0:
     buf.write("""<script type="text/javascript">var secs_left = """)
     buf.write(str(remaining_time_secs))
@@ -1668,12 +2078,12 @@ div.selectors {
           t = setTimeout("UpdateSecondsDisplay();", 1000);
         }}</script>""")
   buf.write("""<body><div class="toplevel"><div class="card"><div class="front">""")
-  buf.write(front_content_creator())
+  front_content_creator(buf)
   buf.write('</div><div id="hidden_portion" style="visibility:hidden;"><div class="back">')
-  buf.write(back_content_creator())
+  back_content_creator(buf)
   buf.write('</div><div class="selectors">')
   if selectors_creator is not None:
-    buf.write(selectors_creator())
+    selectors_creator(buf)
   buf.write("""<form accept-charset="UTF-8" style="display:inline" action=\"""")
   buf.write(handler_url)
   buf.write("""\" method="post">
@@ -1698,10 +2108,10 @@ div.selectors {
       <input type="hidden" name="secs_left" value=\"""")
   buf.write(rts_string)
   buf.write("""\" /></form></div></div><div class="stats">""")
-  buf.write(stats_creator())
+  stats_creator(buf)
   buf.write("""</div></div>""")
   if bottom_creator is not None:
-    buf.write(bottom_creator())
+    bottom_creator(buf)
   buf.write("""<form id="show_form" style="visibility:visible;">
       <input type="button" value="Show Answer"
         onclick="document.getElementById('show_form').setAttribute('style', 'visibility:hidden'); document.getElementById('hidden_portion').setAttribute('style', 'visibility:visible');" />
@@ -1720,263 +2130,45 @@ div.selectors {
 
 
 ################################################################################
-# Code for the 言葉 flashcards application
+# Common tool functions
 ################################################################################
 
-class T言葉のフラッシュカード(TFlashcard):
-  """ Instances of this class are Leitner flashcards with three parts: a
-      Japanese text, an English translation (with optional notes), and the
-      source of the Japanese text."""
+def ツールの設定ファイルを分析する(パス名, ルートの名前, settings_okay, ハンドラ):
+  """ Parse the configuration file whose path is パス名.  This function expects
+      the following parameters:
 
-  def __init__(self, 日本語, 英語, source):
-    """ Construct a new flashcard with the specified Japanese text (日本語),
-        English translation (英語), and source."""
-    self.__日本語 = 日本語
-    self.__英語 = 英語
-    self.__source = source
-    super().__init__()
+        パス名 :: str
+        This is a path to a configuration file.
+      ルートの名前 :: str
+        This specifies the expected root name.
+      settings_okay :: bool
+        If this is True, then the root may contain settings; otherwise, this
+        method will print an error message and terminate the program if the
+        configuration file's root contains any settings.
+      ハンドラ :: (section | setting, str, (str, int) => None) => None
+        This specifies the handler that will process the configuration file's
+        root's settings and sections.  The handler's second parameter is
+        the resolved absolute path equivalent to パス名.  The handler's third
+        parameter is an error function: It prints its first argument as an error
+        message and terminates the program with the specified numeric error
+        code, which defaults to 2.
 
-  def __bytes__(self):
-    return bytes(self.日本語, encoding="UTF-8") + bytes(self.英語, encoding="UTF-8") + bytes(self.Source, encoding="UTF-8")
+      This function will handle several common errors related to configuration
+      file parsing, such as パス名 pointing to something that is not a file.
 
-  @property
-  def 英語(self):
-    """the English translation of the Japanese text"""
-    return self.__英語
-
-  @property
-  def 日本語(self):
-    """the Japanese text"""
-    return self.__日本語
-
-  @property
-  def Source(self):
-    """the source of the Japanese text"""
-    return self.__source
-
-class T言葉のフラッシュカードFormatError(TConfigurationFormatError):
-  """ T言葉のフラッシュカードのパーサ raises this exception when there is a
-      flashcard format error."""
-  pass
-
-class T言葉のフラッシュカードのパーサ(TConfigurationParser):
-  """ This configuration file parser parses 言葉のフラッシュカード files.
-      It passes each フラッシュカード to a client-supplied handler."""
-
-  def __init__(self, on_flashcard_handler):
-    """ Construct a flashcard parser that passes each flashcard to the specified
-        unary handler."""
-    self.__source = None
-    self.__日本語 = None
-    self.__英語 = None
-    self.__handler = on_flashcard_handler
-    def SectionBeginHandler(section, parent):
-      if parent is None:
-        if section.Name != "言葉のフラッシュカード":
-          raise T言葉のフラッシュカードFormatError(self.Line, self.Column, "top-level section isn't 言葉のフラッシュカード")
-      elif self.__source is None:
-        self.__source = section.Name
-      elif self.__日本語 is not None:
-        raise T言葉のフラッシュカードFormatError(self.Line, self.Column, "フラッシュカード sections cannot have subsections")
-      else:
-        self.__日本語 = section.Name
-    def SectionEndHandler(section):
-      if self.__日本語 is not None:
-        if self.__英語 is None:
-          raise T言葉のフラッシュカードFormatError(self.Line, self.Column, "フラッシュカード must have an 英語")
-        self.__Handleカード(T言葉のフラッシュカード(self.__日本語, self.__英語, self.__source))
-        self.__英語 = None
-        self.__日本語 = None
-      elif self.__source is not None:
-        self.__source = None
-    def SettingHandler(setting, section):
-      if self.__日本語 is None:
-        raise T言葉のフラッシュカードFormatError(self.Line, self.Column, "only フラッシュカード sections may have settings")
-      elif self.__英語 is not None:
-        raise T言葉のフラッシュカードFormatError(self.Line, self.Column, "フラッシュカード may only have one setting each")
-      else:
-        self.__英語 = setting
-    super().__init__(SectionBeginHandler, SectionEndHandler, SettingHandler)
-
-  def __Handleカード(self, カード):
-    self.__handler(カード)
-
-  def SetカードHandler(self, handler):
-    """ Set the function (TFlashcard -> ()) that will process parsed cards."""
-    self.__handler = handler
-
-  @property
-  def カードのHandler(self):
-    """the function (TFlashcard -> ()) that will process parsed cards"""
-    return self.__handler
-
-
-
-################################################################################
-# The main server code
-################################################################################
-
-QuizURL = "/"
-CurrentDeck = None
-CurrentSession = None
-FlashcardsFile = None
-FlashcardsStatsLog = None
-LeitnerBuckets = [0]      # list of per-bucket delays (in seconds); bucket zero is implicitly defined
-RemainingTimeSecs = 0
-
-@get(QuizURL)
-def Config():
-  global CurrentSession
-  CurrentSession = str(random.random())
-
-  deck_factory = TCardDeckFactory(
-    FlashcardsFile,
-    lambda: T言葉のフラッシュカードのパーサ(None),
-    lambda parser, handler: parser.SetカードHandler(handler),
-    FlashcardsStatsLog,
-    lambda: TLogParser(None),
-    lambda parser, handler: parser.SetRecordCb(handler),
-    [TLeitnerBucket(delay) for delay in LeitnerBuckets]
-   )
-
-  buf = io.StringIO()
-  BeginHTML5(buf, title="言葉の試験 Setup")
-  buf.write("</head><body><p><h1>言葉の試験 Setup</h1></p><p>")
-  buf.write(str(deck_factory.NumberOfDueCards))
-  buf.write(" of ")
-  buf.write(str(deck_factory.NumberOfCards))
-  buf.write(" cards are due.  (")
-  buf.write(str(deck_factory.NumberOfNewCards))
-  buf.write(" are new.)</p><p><table border='1'><caption>Leitner Bucket Distribution</caption><tr><th style='text-align: left'>Bucket Number</th>")
-  for bucket in range(len(deck_factory.Buckets)):
-    buf.write("<td style='text-align: center'>" + str(bucket) + "</td>")
-  buf.write("</tr><tr><th style='text-align: left'>Cards Count / Cards Due</th>")
-  for bucket in deck_factory.Buckets:
-    buf.write("<td style='text-align: center'>")
-    if bucket.CardCount:
-      buf.write(str(bucket.CardCount) + ("/" + str(bucket.DueCardCount) if bucket.DueCardCount else ""))
-    else:
-      buf.write("&nbsp;")
-    buf.write("</td>")
-  buf.write("""</tr></table></p><p><form method="post" action=\"""")
-  buf.write(QuizURL)
-  buf.write("""\">
-<fieldset><legend>Limits</legend><p>
-<table><tr><th style="text-align:right"><label>Time:</label></th>
-<td><input type="text" id="時" name="hours" pattern="[0-9]*" /></td><td><label for="時">時</label></td></tr>
-<tr><td></td><td><input type="text" id="分" name="minutes" pattern="[0-9]*" /></td><td><label for="分">分</label></td></tr>
-<tr><td></td><td><input type="text" id="秒" name="seconds" pattern="[0-9]*" /></td><td><label for="秒">秒</label></td></tr>
-</table></p><p>
-<table>
-<tr><th style="text-align:right"><label>Max deck size:</label></th><td><input type="text" name="size" pattern="[0-9]*" title="the maximum number of due cards to show or the maximum deck size if no cards are due"/></td></tr>
-<tr><th style="text-align:right"><label>Max new cards:</label></th><td><input type="text" name="num_new_cards" pattern="[0-9]*" title="the maximum number of new cards to show" /></td></tr>
-</table></p></fieldset>
-<input type="submit" value="始めましょう！" autofocus="autofocus" />
-<input type="hidden" name="method" value="configure" />
-<input type="hidden" name="session_token" value=\"""")
-  buf.write(CurrentSession)
-  buf.write("""\" /></form></p></body></html>""")
-  return buf.getvalue()
-
-@post(QuizURL)
-def HandlePost():
-  global CurrentDeck
-  global CurrentSession
-  global RemainingTimeSecs
-
-  session = request.forms.session_token
-  if not session:
-    abort(400, "no session")
-  if CurrentSession is None:
-    CurrentSession = session
-  elif session != CurrentSession:
-    abort(400, "session is no longer valid")
-
-  method = request.forms.method
-  if method == "configure":
-    # TODO Detect when another session is running and confirm overwriting it.
-
-    # Parse the quiz's configuration and create a deck.
-    RemainingTimeSecs = 60 * 60 * StrToInt(request.forms.hours, "hours")
-    RemainingTimeSecs += 60 * StrToInt(request.forms.minutes, "minutes")
-    RemainingTimeSecs += StrToInt(request.forms.seconds, "seconds")
-
-    # Parse the flashcards file and create a deck from some of the cards.
-    deck_factory = TCardDeckFactory(
-      FlashcardsFile,
-      lambda: T言葉のフラッシュカードのパーサ(None),
-      lambda parser, handler: parser.SetカードHandler(handler),
-      FlashcardsStatsLog,
-      lambda: TLogParser(None),
-      lambda parser, handler: parser.SetRecordCb(handler),
-      [TLeitnerBucket(delay) for delay in LeitnerBuckets]
-     )
-    CurrentDeck = TCardDeck(
-      deck_factory.ConstructDeck(
-        StrToInt(request.forms.size, "size")
-         if request.forms.size
-         else deck_factory.NumberOfCards,
-        StrToInt(request.forms.num_new_cards, "num_new_cards")
-         if request.forms.num_new_cards
-         else 0
-       )
-     )
-
-    # Finally, render the first card.
-    return RenderCard()
-
-  assert CurrentDeck
-  RemainingTimeSecs = StrToInt(request.forms.secs_left, "secs_left")
-  if method == "success":
-    CurrentDeck.MarkSucceeded()
-    if CurrentDeck.HasCards:
-      return RenderCard()
-    else:
-      return RenderFinishPage(False)
-  elif method == "failure":
-    CurrentDeck.MarkFailed()
-    if CurrentDeck.HasCards:
-      return RenderCard()
-    else:
-      return RenderFinishPage(False)
-  elif method == "timeout":
-    return RenderFinishPage(True)
-  else:
-    abort(400, "bad method choice")
-
-def Main():
-  global FlashcardsFile
-  global FlashcardsStatsLog
-
-  parser = argparse.ArgumentParser(description="月詠は日本語を勉強するツールです。")
-  parser.add_argument(
-    "ポート番号",
-    help="サーバのポート番号です。"
-   )
-  parser.add_argument(
-    "サーバの設定ファイル",
-    help="path to the file containing the server's settings"
-   )
-
-  args = parser.parse_args(sys.argv[1:])
-  try:
-    ポート番号 = int(args.ポート番号)
-  except ValueError:
-    sys.stderr.write("すみません、サーバのポート番号は駄目です。外のポート番号を使って下さい。\n")
+      """
+  # Ensure that the provided configuration file is a readable file.
+  if not os.path.isfile(パス名):
+    sys.stderr.write("すみません、" + パス名 + "はファイルじゃありません。外のパス名を使って下さい。\n")
     sys.exit(2)
-
-  # Ensure that the providnonlocal 振り仮名があるed server configuration file is a readable file.
-  if not os.path.isfile(args.サーバの設定ファイル):
-    sys.stderr.write("すみません、" + args.サーバの設定ファイル + "はファイルじゃありません。外のパス名を使って下さい。\n")
-    sys.exit(2)
-  if not os.access(args.サーバの設定ファイル, os.R_OK):
-    sys.stderr.write("すみません、" + args.サーバの設定ファイル + "を開けて読めません。\n")
+  if not os.access(パス名, os.R_OK):
+    sys.stderr.write("すみません、" + パス名 + "を開けて読めません。\n")
     sys.exit(2)
 
   # Parse the configuration file.
   parser = TConfigurationDOMParser()
   try:
-    with open(args.サーバの設定ファイル, "r") as f:
+    with open(パス名, "r") as f:
       parser.ParseStrings(f)
     parser.Finish()
   except TConfigurationFormatError as e:
@@ -1984,237 +2176,23 @@ def Main():
     sys.stderr.write(str(e) + "\n")
     sys.exit(2)
   except Exception as e:
-    sys.stderr.write("Unexpected error: " + str(e) + "\n")
+    sys.stderr.write("unexpected error while parsing the configuration file: " + str(e) + "\n")
     sys.exit(2)
-  args.サーバの設定ファイル = os.path.abspath(os.path.dirname(args.サーバの設定ファイル))
+  パス名 = os.path.abspath(os.path.dirname(パス名))
 
-  # Extract server settings from the configuration file.
+  # Extract sections and settings from the configuration file.
   # Check for errors.
-  def PrintErrorAndExit(message):
+  def PrintErrorAndExit(message, error_code=2):
     sys.stderr.write("すみません、その設定ファイルは駄目です。" + message + "\n")
-    sys.exit(2)
-  if parser.Root.Name != "server-configuration":
-    PrintErrorAndExit("The root's name should be 'server-configuration'.")
-  if parser.Root.HasSettings:
+    sys.exit(error_code)
+  if parser.Root.Name != ルートの名前:
+    PrintErrorAndExit("The root's name should be '" + ルートの名前 + "'.")
+  if parser.Root.HasSettings and not settings_okay:
     PrintErrorAndExit("The root node cannot have settings.")
 
-  delays_defined = False
-
-  for section in parser.Root.YieldSections():
-    if section.Name == "kotoba-flashcards-file":
-      if not section.IsAttribute:
-        PrintErrorAndExit("Settings must be attributes.")
-      if FlashcardsFile is not None:
-        PrintErrorAndExit("It has two 'kotoba-flashcards-file' attributes.")
-      FlashcardsFile = EnsureAbsolutePath(section.Value, args.サーバの設定ファイル)
-      if not os.path.isfile(FlashcardsFile):
-        PrintErrorAndExit("The kotoba-flashcards-file '" + FlashcardsFile + "' is not a file.")
-      if not os.access(FlashcardsFile, os.R_OK):
-        PrintErrorAndExit("The kotoba-flashcards-file '" + FlashcardsFile + "' cannot be read.")
-    elif section.Name == "kotoba-flashcards-stats-log":
-      if not section.IsAttribute:
-        PrintErrorAndExit("Settings must be attributes.")
-      if FlashcardsStatsLog is not None:
-        PrintErrorAndExit("It has two 'kotoba-flashcards-stats-log' attributes.")
-      FlashcardsStatsLog = EnsureAbsolutePath(section.Value, args.サーバの設定ファイル)
-      if os.path.exists(FlashcardsStatsLog):
-        if not os.path.isfile(FlashcardsStatsLog):
-          PrintErrorAndExit("The kotoba-flashcards-file '" + FlashcardsStatsLog + "' is not a file.")
-        if not os.access(FlashcardsStatsLog, os.R_OK):
-          PrintErrorAndExit("The kotoba-flashcards-file '" + FlashcardsStatsLog + "' cannot be read.")
-    elif section.Name == "kotoba-flashcards-delays":
-      if delays_defined:
-        PrintErrorAndExit("It has two 'kotoba-flashcards-delays' sections.")
-      delays_defined = True
-      if section.HasSections:
-        PrintErrorAndExit("The 'kotoba-flashcards-delays' section has subsections.")
-      for delay in section.Settings:
-        try:
-          delay = float(delay)
-        except ValueError:
-          PrintErrorAndExit("'kotoba-flashcards-delays' has a non-numeric delay: " + delay)
-        delay = int(delay * 86400)
-        if delay < 0:
-          PrintErrorAndExit("'kotoba-flashcards-delays' has a delay that is is less than zero.")
-        LeitnerBuckets.append(delay)
-    else:
-      PrintErrorAndExit("A section has an invalid name: " + section.Name)
-
-  # Start the server.
-  run(host='localhost', port=ポート番号, debug=True)
-
-# TODO Download kanji stroke order diagrams automatically or via a separate program.
-#      Don't rely on external sources for every image.
-def RenderCard():
-  カード = CurrentDeck.GetCard()
-  振り仮名がある = False
-  振り仮名producer = T言葉と振り仮名Producer('(', ')')
-  def KanjiOnClickGenerator(字):
-    quoted = urllib.parse.quote(字)
-    return """window.open('http://jisho.org/kanji/details/""" + quoted + """', '""" + quoted + """')"""
-  def KanjiOnMouseoverGenerator(字):
-    return ("setKanjiImage('http://jisho.org/static/images/stroke_diagrams/" +
-     str(ord(字)) + "_frames.png')")
-
-  def GenerateHead():
-    return """<style type="text/css">
-span.passed {
-  color: green;
-}
-
-span.failed {
-  color: red;
-}
-
-span.seen {
-  color: blue;
-}
-
-span.kanji:hover {
-  color: blue;
-}
-
-</style><script type="text/javascript">
-var furigana = 'hidden';
-
-function toggle_visibility(furigana_class) {
-  furigana = (furigana == 'visible' ? 'hidden' : 'visible');
-  var spans = document.getElementsByTagName('rp');
-  var i = 0;
-  for (i = 0; i < spans.length; i++) {
-    var span_node = spans.item(i);
-    if (span_node.getAttribute('class') == furigana_class) {
-      span_node.setAttribute('style', 'visibility:' + furigana);
-    }
-  }
-  spans = document.getElementsByTagName('rt');
-  i = 0;
-  for (i = 0; i < spans.length; i++) {
-    var span_node = spans.item(i);
-    if (span_node.getAttribute('class') == furigana_class) {
-      span_node.setAttribute('style', 'visibility:' + furigana);
-    }
-  }
-  var show_button = document.getElementsByName('振り仮名を見せて')[0];
-  if (furigana == 'visible') {
-    show_button.setAttribute('value', 'Hide 振り仮名');
-  } else {
-    show_button.setAttribute('value', '振り仮名を見せて');
-  }
-}
-
-kanji_diagram_enabled = false;
-kanji_diagram_src_set = false;
-
-function showKanjiDiagram() {
-  kanji_image = document.getElementsByName('漢字diagram')[0];
-  kanji_image.setAttribute('style', 'display: block; max-width: 100%; margin-left: auto; margin-right: auto');
-}
-
-function enableKanjiView() {
-  kanji_diagram_enabled = true;
-  kanji_image = document.getElementsByName('漢字diagram')[0];
-  show_kanji = document.getElementsByName('show_kanji')[0];
-  show_kanji.setAttribute('style', 'display: none');
-  if (kanji_diagram_src_set) {
-    showKanjiDiagram();
-  }
-}
-
-function setKanjiImage(url_text) {
-  kanji_diagram_src_set = true;
-  kanji_image = document.getElementsByName('漢字diagram')[0];
-  if (kanji_image.getAttribute('src') != url_text) {
-    kanji_image.setAttribute('src', url_text);
-  }
-  if (kanji_diagram_enabled) {
-    showKanjiDiagram();
-  }
-}
-
-</script>"""
-  def RenderSource(buf):
-    nonlocal 振り仮名がある
-    buf.write("<br />(Source: ")
-    振り仮名producer.Reset()
-    振り仮名producer.Process(カード.Source)
-    振り仮名producer.Finish()
-    GenerateHTML5Ruby(振り仮名producer.Results, buf, "kanji", KanjiOnClickGenerator, KanjiOnMouseoverGenerator, "furigana", False)
-    buf.write(")")
-    振り仮名がある = 振り仮名がある or any(ペア.振り仮名 for ペア in 振り仮名producer.Results)
-  def GenerateFront():
-    nonlocal 振り仮名がある
-    buf = io.StringIO()
-    振り仮名producer.Reset()
-    振り仮名producer.Process(カード.日本語)
-    振り仮名producer.Finish()
-    GenerateHTML5Ruby(振り仮名producer.Results, buf, "kanji", KanjiOnClickGenerator, KanjiOnMouseoverGenerator, "furigana", False)
-    振り仮名がある = 振り仮名がある or any(ペア.振り仮名 for ペア in 振り仮名producer.Results)
-    return buf.getvalue()
-  def GenerateBack():
-    nonlocal 振り仮名がある
-    buf = io.StringIO()
-    振り仮名producer.Reset()
-    振り仮名producer.Process(カード.英語)
-    振り仮名producer.Finish()
-    GenerateHTML5Ruby(振り仮名producer.Results, buf, "kanji", KanjiOnClickGenerator, KanjiOnMouseoverGenerator, "furigana", False)
-    振り仮名がある = 振り仮名がある or any(ペア.振り仮名 for ペア in 振り仮名producer.Results)
-    return buf.getvalue()
-  def GenerateSelectors():
-    buf = io.StringIO()
-    buf.write("<form><input type='button' name='show_kanji' value='漢字の書き方を見せて' onclick='enableKanjiView()'/>")
-    if 振り仮名がある:
-      buf.write("""<input type="button" name="振り仮名を見せて" value="振り仮名を見せて" onclick="toggle_visibility('furigana')"/>""")
-    buf.write("</form>")
-    return buf.getvalue()
-  def GenerateStats():
-    buf = io.StringIO()
-    stats = CurrentDeck.Statistics
-    buf.write("""<span class="passed">""")
-    buf.write(str(stats.NumPassedOnFirstTry))
-    buf.write(""" passed</span>, <span class="failed">""")
-    buf.write(str(stats.NumFailedOnFirstTry))
-    buf.write(""" failed</span>, <span class="seen">""")
-    buf.write(str(stats.NumAttempts))
-    buf.write(" seen</span>, ")
-    buf.write(str(stats.NumCardsLeft))
-    buf.write(" of ")
-    buf.write(str(stats.NumCards))
-    buf.write(" left")
-    if RemainingTimeSecs > 0:
-      buf.write(""" <span id="time_left">""" +
-        str(RemainingTimeSecs // 3600) + "時" +
-        str((RemainingTimeSecs % 3600) // 60) + "分" +
-        str((RemainingTimeSecs % 3600) % 60) + "秒</span>"
-       )
-    return buf.getvalue()
-  def GenerateBottom():
-    return """<img name="漢字diagram" style="display: none" alt="漢字 Stroke Diagram" src="" />"""
-
-  return GenerateCardHTML("/", CurrentSession, "言葉の試験", RemainingTimeSecs,
-   GenerateHead, GenerateFront, GenerateBack, GenerateSelectors, GenerateStats,
-   GenerateBottom)
-
-def RenderFinishPage(timed_out):
-  assert CurrentDeck is not None
-  buf = io.StringIO()
-  if FlashcardsStatsLog is not None:
-    try:
-      with open(FlashcardsStatsLog, "a") as logf:
-        CurrentDeck.Statistics.Log(logf)
-    except IOError as e:
-      buf.write("WARNING: Failed to open or write to the stats log: " + str(e) + "\n")
-  buf.write("Timed out!" if timed_out else "Done!")
-  return buf.getvalue()
-
-def StrToInt(text, name):
-  try:
-    return int(text) if text else 0
-  except ValueError:
-    abort(400, name + " is not an integer: " + str(text))
-
-if __name__ == "__main__":
-  Main()
+  # Process the configuration file's root's settings and sections.
+  for child in parser.Root.Children:
+    ハンドラ(child, パス名, PrintErrorAndExit)
 
 
 
