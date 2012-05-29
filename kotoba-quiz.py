@@ -256,7 +256,14 @@ def HandlePost():
   assert CurrentDeck
   RemainingTimeSecs = StrToInt(request.forms.secs_left, "secs_left")
   if method == "success":
-    CurrentDeck.MarkSucceeded()
+    if FlashcardsStatsLog is not None:
+      try:
+        with open(FlashcardsStatsLog, "a") as logf:
+          CurrentDeck.MarkSucceeded(TLogWriter(logf))
+      except IOError as e:
+        abort(500, "WARNING: Failed to open or write to the stats log: " + str(e) + "\n")
+    else:
+      CurrentDeck.MarkSucceeded(None)
     if CurrentDeck.HasCards:
       return RenderCard()
     else:
@@ -531,12 +538,6 @@ function hideKanjiImage(kanji) {
 def RenderFinishPage(timed_out):
   assert CurrentDeck is not None
   buf = io.StringIO()
-  if FlashcardsStatsLog is not None:
-    try:
-      with open(FlashcardsStatsLog, "a") as logf:
-        CurrentDeck.Statistics.Log(logf)
-    except IOError as e:
-      buf.write("WARNING: Failed to open or write to the stats log: " + str(e) + "\n")
   buf.write("Timed out!" if timed_out else "Done!")
   return buf.getvalue()
 

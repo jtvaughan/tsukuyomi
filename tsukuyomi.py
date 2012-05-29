@@ -362,7 +362,7 @@ class TConfigurationParser(object):
   __POST_NAME = 4
   __LINE_COMMENT = 5
 
-  __COMMENT_CHARS = {'#', '@'}
+  _COMMENT_CHARS = {'#', '@'}
 
   def __init__(self, section_begin_callback, section_end_callback, setting_callback):
     self.__section_begin_cb = section_begin_callback
@@ -450,7 +450,7 @@ class TConfigurationParser(object):
         raise TConfigurationFormatError(self.Line, self.Column, "Opening the top-level section without a name")
       elif char == '}':
         raise TConfigurationFormatError(self.Line, self.Column, "Closing the top-level section without opening it")
-      elif char in self.__COMMENT_CHARS:
+      elif char in self._COMMENT_CHARS:
         self.__prior_state = self.__state
         self.__state = self.__LINE_COMMENT
       else:
@@ -466,25 +466,23 @@ class TConfigurationParser(object):
           raise TConfigurationFormatError(self.Line, self.Column, "Closing a nonexistent section at the top level")
         else:
           self.__section_end_cb(self.__section_stack.pop())
-      elif char in self.__COMMENT_CHARS:
+      elif char in self._COMMENT_CHARS:
         self.__prior_state = self.__state
         self.__state = self.__LINE_COMMENT
       else:
         raise TConfigurationFormatError(self.Line, self.Column, "Unexpected character: '" + char + "'")
 
   def __HandleName(self, char):
-    if char == '"':
+    if char == '\\':
       self.__state = self.__NAME_ESCAPE
+    elif char == '"':
+      self.__state = self.__POST_NAME
     else:
       self.__name.write(char)
 
   def __HandleNameEscape(self, char):
-    if char == '"':
-      self.__name.write(char)
-      self.__state = self.__NAME
-    else:
-      self.__state = self.__POST_NAME
-      self.__HandlePostName(char)
+    self.__name.write(char)
+    self.__state = self.__NAME
 
   def __HandlePostName(self, char):
     if not char.isspace():
@@ -513,7 +511,7 @@ class TConfigurationParser(object):
           finally:
             section = self.__section_stack.pop()
           self.__section_end_cb(section)
-      elif char in self.__COMMENT_CHARS:
+      elif char in self._COMMENT_CHARS:
         self.__prior_state = self.__state
         self.__state = self.__LINE_COMMENT
       else:
@@ -570,9 +568,14 @@ def WriteConfiguration(fobj, section, pretty_print=False, tab_size=2):
       of spaces per generated tab; otherwise, 'tab_size' is ignored."""
   assert isinstance(section, TSection)
 
+  escape_map = dict(itertools.chain(
+    ((c, '\\' + c) for c in TConfigurationParser._COMMENT_CHARS),
+    [('"', '\\"')]
+   ))
+
   def WriteEncodedString(text):
     for c in text:
-      fobj.write(c if c != '"' else '""')
+      fobj.write(escape_map.get(c, c))
 
   num_tabs = 0
   if pretty_print:
@@ -680,7 +683,7 @@ class TLogParser(object):
   __POST_FIELD_PRE_COLON = 3
   __LINE_COMMENT = 4
 
-  __COMMENT_CHARS = {'#', '@'}
+  _COMMENT_CHARS = {'#', '@'}
   __FINISH_STATES = {__PRE_FIELD, __POST_FIELD_PRE_COLON, __LINE_COMMENT}
 
   def __init__(self, entry_callback):
@@ -761,7 +764,7 @@ class TLogParser(object):
       elif char == ':':
         self.__fields.append("")
         self.__colon_seen = True
-      elif char in self.__COMMENT_CHARS:
+      elif char in self._COMMENT_CHARS:
         self.__FinishEntry(self.__LINE_COMMENT)
       else:
         raise TLogFormatError(self.Line, self.Column, self.EntryNumber, "unexpected character: " + char)
@@ -769,36 +772,25 @@ class TLogParser(object):
       self.__FinishEntry(self.__PRE_FIELD)
 
   def __HandleField(self, char):
-    if char == '"':
+    if char == '\\':
       self.__state = self.__FIELD_ESCAPE
+    elif char == '"':
+      self.__fields.append(self.__field_buffer.getvalue())
+      self.__field_buffer = io.StringIO()
+      self.__state = self.__POST_FIELD_PRE_COLON
     else:
       self.__field_buffer.write(char)
 
   def __HandleFieldEscape(self, char):
-    if char == '"':
-      self.__field_buffer.write(char)
-      self.__state = self.__FIELD
-    else:
-      self.__fields.append(self.__field_buffer.getvalue())
-      self.__field_buffer = io.StringIO()
-      if char == '\n':
-        self.__FinishEntry(self.__PRE_FIELD)
-      elif char.isspace():
-        self.__state = self.__POST_FIELD_PRE_COLON
-      elif char == ':':
-        self.__state = self.__PRE_FIELD
-        self.__colon_seen = True
-      elif char in self.__COMMENT_CHARS:
-        self.__FinishEntry(self.__LINE_COMMENT)
-      else:
-        raise TLogFormatError(self.Line, self.Column, self.EntryNumber, "unexpected character: " + char)
+    self.__field_buffer.write(char)
+    self.__state = self.__FIELD
 
   def __HandlePostFieldPreColon(self, char):
     if not char.isspace():
       if char == ':':
         self.__state = self.__PRE_FIELD
         self.__colon_seen = True
-      elif char in self.__COMMENT_CHARS:
+      elif char in self._COMMENT_CHARS:
         self.__FinishEntry(self.__LINE_COMMENT)
       else:
         raise TLogFormatError(self.Line, self.Column, self.EntryNumber, "unexpected character: " + char)
@@ -819,6 +811,11 @@ class TLogParser(object):
 
 class TLogWriter(object):
 
+  __CHAR_TO_ESCAPE_MAP = dict(itertools.chain(
+    ((c, '\\' + c) for c in TLogParser._COMMENT_CHARS),
+    [('"', '\\"')]
+   ))
+
   def __init__(self, stream=None):
     self.__stream = stream
     super().__init__()
@@ -837,7 +834,7 @@ class TLogWriter(object):
 
   def __WriteEncodedString(self, text):
     for char in text:
-      self.__stream.write(char if char != '"' else '""')
+      self.__stream.write(self.__CHAR_TO_ESCAPE_MAP.get(char, char))
 
   def __WriteField(self, field, is_final_field):
     data = str(field)
@@ -1554,20 +1551,10 @@ class TCardDeckStatistics(object):
       self.__cards.add(card)
     self.__retry_map[card] = self.__retry_map.get(card, 0) + 1
 
-  def CardPassed(self, card):
-    """Note that the user successfully answered the specified card."""
-    self.__num_attempts += 1
-    if card not in self.__retry_map:
-      self.__num_passed_on_first_try += 1
-    self.__cards.add(card)
-    self.__num_left -= 1
-
-  # Log format:
-  #
-  #   <date-stamp>:<card-hash>:<failed-flag>
-  def Log(self, stream):
-    """ Write statistics about cards that the user has seen to the specified
-        file-like object.  The data is stored as log entries.  Each entry has
+  def CardPassed(self, card, log_writer):
+    """ Note that the user successfully answered the specified card.
+        Additionally, the user's performance with the card will be recorded
+        via the specified log file writer.  A card's performance record has
         the following fields (in order):
 
           1. the current timestamp as returned by time.time();
@@ -1575,11 +1562,16 @@ class TCardDeckStatistics(object):
              the SHA-1 hash of the result of constructing a bytes object from
              the card); and
           3. the number of times the user had to retry the card before he
-             successfully answered it."""
-    writer = TLogWriter(stream)
-    now = time.time()
-    for card in self.__cards:
-      writer.Write((now, card.Hash, self.__retry_map.get(card, 0)))
+             successfully answered it.
+
+        If log_writer is None, then no performance data will be recorded."""
+    self.__num_attempts += 1
+    if card not in self.__retry_map:
+      self.__num_passed_on_first_try += 1
+    self.__cards.add(card)
+    self.__num_left -= 1
+    if log_writer is not None:
+      log_writer.Write((time.time(), card.Hash, self.__retry_map.get(card, 0)))
 
   @property
   def CardsSeen(self):
@@ -1666,14 +1658,16 @@ class TCardDeck(object):
     self.__current_card_marked = True
     self.Statistics.CardFailed(self.__current_card)
 
-  def MarkSucceeded(self):
+  def MarkSucceeded(self, log_writer):
     """ Mark the current card (that is, the card that was last drawn) as
         "succeeded" (that is, the user answered it correctly).  This method
-        will remove the card from the deck."""
+        will remove the card from the deck.  Additionally, it will record
+        the user's performance with the card via the specified log
+        file writer."""
     assert self.__current_card is not None
     assert not self.__current_card_marked
     self.__current_card_marked = True
-    self.Statistics.CardPassed(self.__current_card)
+    self.Statistics.CardPassed(self.__current_card, log_writer)
 
   @property
   def CurrentCard(self):

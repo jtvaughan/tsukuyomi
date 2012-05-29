@@ -213,9 +213,10 @@ There are two special
 in the grammar.  `EMPTY` means what it
 says: It is an empty string (no characters).  `TEXT` is any arbitrary
 string of characters in which every occurrence of `DOUBLE-QUOTE` is
-escaped by another `DOUBLE-QUOTE`.  For example, the string
+escaped by a prefixed backslash ('\').  (Any character can be escaped with a
+backslash.)  For example, the string
 
->     Why is ""Hello, world!"" the universal first program?
+>     Why is \"Hello, world!\" the universal first program?
 
 is a valid `TEXT` terminal because every `DOUBLE-QUOTE` is properly
 escaped.  When the escapes are removed, the text becomes:
@@ -299,10 +300,11 @@ There are two special
 [terminals](http://en.wikipedia.org/wiki/Context-free_grammar#Formal_definitions)
 in the grammar.  `EMPTY` means what it
 says: It is an empty string (no characters).  `TEXT` is any arbitrary
-string of characters in which every occurrence of `DOUBLE-QUOTE` is escaped
-by another `DOUBLE-QUOTE`.  For example, the string
+string of characters in which every occurrence of `DOUBLE-QUOTE` is
+escaped by a prefixed backslash ('\').  (Any character can be escaped with a
+backslash.)  For example, the string
 
->     Why is ""Hello, world!"" the universal first program?
+>     Why is \"Hello, world!\" the universal first program?
 
 is a valid `TEXT` terminal because every `DOUBLE-QUOTE` is properly
 escaped.  When the escapes are removed, the text becomes:
