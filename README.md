@@ -302,8 +302,7 @@ says: It is an empty string (no characters).  `TEXT` is any arbitrary
 string of characters, including whitespace.  Any character can be escaped with a
 backslash.  For example, the string
 
->     Why is "Hello, world!" the universal first program?  This is why\:
->     it's easy.
+>     Why is "Hello, world!" the universal first program?  This is why\: it's easy.
 
 is a valid `TEXT` terminal.
 
