@@ -284,7 +284,7 @@ describing log files (`log-file` is the
 
 >     record = field NEWLINE | possibly-empty-field COLON trailing-fields NEWLINE
 
->     field = DOUBLE-QUOTE TEXT DOUBLE-QUOTE
+>     field = TEXT
 
 >     empty-field = EMPTY
 
@@ -293,30 +293,19 @@ describing log files (`log-file` is the
 >     trailing-fields = empty-field | possibly-empty-field COLON trailing-fields
 
 >     COLON = ':'
->     DOUBLE-QUOTE = '"'
 >     NEWLINE = '\n'
 
 There are two special
 [terminals](http://en.wikipedia.org/wiki/Context-free_grammar#Formal_definitions)
 in the grammar.  `EMPTY` means what it
 says: It is an empty string (no characters).  `TEXT` is any arbitrary
-string of characters in which every occurrence of `DOUBLE-QUOTE` is
-escaped by a prefixed backslash ('\').  (Any character can be escaped with a
-backslash.)  For example, the string
+string of characters, including whitespace.  Any character can be escaped with a
+backslash.  For example, the string
 
->     Why is \"Hello, world!\" the universal first program?
+>     Why is "Hello, world!" the universal first program?  This is why\:
+>     it's easy.
 
-is a valid `TEXT` terminal because every `DOUBLE-QUOTE` is properly
-escaped.  When the escapes are removed, the text becomes:
-
->     Why is "Hello, world!" the universal first program?
-
-But
-
->     I said, "Hello, world!"
-
-is not a valid `TEXT` terminal because there are unescaped
-`DOUBLE-QUOTE`s within the string.
+is a valid `TEXT` terminal.
 
 Log files may contain comments.  A comment begins with
 `@` or `#` and proceeds to the end of the line (that is, up to and
@@ -324,9 +313,11 @@ including the next `NEWLINE` in the file).  Comments cannot occur
 within `TEXT` terminals.  Comments are ignored by 月詠, so they can
 contain any valid UTF-8 text.
 
-Note that whitespace, including `NEWLINE`s, is captured in `TEXT`
-terminals.  However, whitespace is ignored everywhere else _except_
-at the end of records, where `NEWLINE`s terminate records.
+Note that all whitespace except `NEWLINE` is captured in `TEXT` terminals.
+`NEWLINE`s may be escaped.  Lines containing nothing but whitespace are
+considered records, each containing a single `FIELD` holding the whitespace
+found on the line.  Whitespace at the end of a line is considered part of that
+line's record's last field.
 
 
 
