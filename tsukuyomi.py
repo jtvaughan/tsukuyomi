@@ -378,6 +378,11 @@ class TConfigurationParser(object):
     if self.__state != self.__PRE_NAME or self.__section_stack:
       raise TConfigurationFormatError(self.Line, self.Column, "Incomplete document")
 
+  def ParseFileAndFinish(self, file_path):
+    with open(file_path, "r") as f:
+      self.ParseStrings(f)
+    self.Finish()
+
   def ParseString(self, text):
     for char in text:
       self.__Handlers[self.__state](self, char)
@@ -655,7 +660,7 @@ class TLogFormatError(Exception):
   def __init__(self, line, column, entry_number, message):
     self.__line = line
     self.__column = column
-    self.__entry_number = entry_number
+    self.__record_number = entry_number
     self.__message = message
     super().__init__(str(line) + ":" + str(column) + " " + message)
 
@@ -664,8 +669,8 @@ class TLogFormatError(Exception):
     return self.__column
 
   @property
-  def EntryNumber(self):
-    return self.__entry_number
+  def RecordNumber(self):
+    return self.__record_number
 
   @property
   def Line(self):
@@ -677,32 +682,35 @@ class TLogFormatError(Exception):
 
 class TLogParser(object):
 
-  __PRE_FIELD = 0
+  __PRE_RECORD = 0
   __FIELD = 1
   __FIELD_ESCAPE = 2
-  __POST_FIELD_PRE_COLON = 3
-  __LINE_COMMENT = 4
+  __LINE_COMMENT = 3
 
   _COMMENT_CHARS = {'#', '@'}
-  __FINISH_STATES = {__PRE_FIELD, __POST_FIELD_PRE_COLON, __LINE_COMMENT}
+  __FINISH_STATES = {__PRE_RECORD, __FIELD, __LINE_COMMENT}
 
-  def __init__(self, entry_callback):
-    self.__entry_callback = entry_callback
-    self.__state = self.__PRE_FIELD
+  def __init__(self, record_callback):
+    self.__record_callback = record_callback
+    self.__state = self.__PRE_RECORD
     self.__line = 1
     self.__column = 1
     self.__absolute_position = 1
-    self.__entry = 1
+    self.__record = 1
     self.__fields = []
     self.__field_buffer = io.StringIO()
-    self.__colon_seen = False
     super().__init__()
 
   def Finish(self):
     if self.__state not in self.__FINISH_STATES:
-      raise TLogFormatError(self.Line, self.Column, self.EntryNumber, "finished in the middle of a field")
-    else:
-      self.__FinishEntry(self.__PRE_FIELD)
+      raise TLogFormatError(self.Line, self.Column, self.RecordNumber, "finished in the middle of a character escape")
+    elif self.__state == self.__FIELD:
+      self.__FinishRecord(self.__PRE_RECORD)
+
+  def ParseFileAndFinish(self, file_path):
+    with open(file_path, "r") as f:
+      self.ParseStrings(f)
+    self.Finish()
 
   def ParseString(self, text):
     for char in text:      
@@ -719,7 +727,7 @@ class TLogParser(object):
       self.ParseString(line)
 
   def SetRecordCb(self, callback):
-    self.__entry_callback = callback
+    self.__record_callback = callback
 
   @property
   def AbsolutePosition(self):
@@ -727,15 +735,15 @@ class TLogParser(object):
 
   @property
   def RecordCb(self):
-    return self.__entry_callback
+    return self.__record_callback
 
   @RecordCb.setter
-  def RecordCb(self, entry_callback):
-    self.__entry_callback = entry_callback
+  def RecordCb(self, record_callback):
+    self.__record_callback = record_callback
 
   @property
-  def EntryNumber(self):
-    return self.__entry
+  def RecordNumber(self):
+    return self.__record
 
   @property
   def Column(self):
@@ -745,39 +753,38 @@ class TLogParser(object):
   def Line(self):
     return self.__line
 
-  def __FinishEntry(self, new_state):
+  def __FinishRecord(self, new_state):
+    self.__FinishField()
     self.__state = new_state
-    if self.__colon_seen:
-      self.__fields.append("")
-      self.__colon_seen = False
-    if self.__fields:
-      entry = tuple(self.__fields)
-      self.__fields = []
-      self.__entry += 1
-      self.RecordCb(entry)
+    record = tuple(self.__fields)
+    self.__fields = []
+    self.__record += 1
+    self.RecordCb(record)
 
-  def __HandlePreField(self, char):
-    if not char.isspace():
-      if char == '"':
-        self.__state = self.__FIELD
-        self.__colon_seen = False
-      elif char == ':':
-        self.__fields.append("")
-        self.__colon_seen = True
-      elif char in self._COMMENT_CHARS:
-        self.__FinishEntry(self.__LINE_COMMENT)
+  def __FinishField(self):
+    self.__fields.append(self.__field_buffer.getvalue())
+    self.__field_buffer = io.StringIO()
+
+  def __HandlePreRecord(self, char):
+    if char != '\n':
+      if char in self._COMMENT_CHARS:
+        self.__state = self.__LINE_COMMENT
       else:
-        raise TLogFormatError(self.Line, self.Column, self.EntryNumber, "unexpected character: " + char)
-    elif char == '\n':
-      self.__FinishEntry(self.__PRE_FIELD)
+        self.__state = self.__FIELD
+        if char == ':':
+          self.__fields.append("")
+        else:
+          self.__HandleField(char)
 
   def __HandleField(self, char):
     if char == '\\':
       self.__state = self.__FIELD_ESCAPE
-    elif char == '"':
-      self.__fields.append(self.__field_buffer.getvalue())
-      self.__field_buffer = io.StringIO()
-      self.__state = self.__POST_FIELD_PRE_COLON
+    elif char == ':':
+      self.__FinishField()
+    elif char in self._COMMENT_CHARS:
+      self.__FinishRecord(self.__LINE_COMMENT)
+    elif char == '\n':
+      self.__FinishRecord(self.__PRE_RECORD)
     else:
       self.__field_buffer.write(char)
 
@@ -785,36 +792,23 @@ class TLogParser(object):
     self.__field_buffer.write(char)
     self.__state = self.__FIELD
 
-  def __HandlePostFieldPreColon(self, char):
-    if not char.isspace():
-      if char == ':':
-        self.__state = self.__PRE_FIELD
-        self.__colon_seen = True
-      elif char in self._COMMENT_CHARS:
-        self.__FinishEntry(self.__LINE_COMMENT)
-      else:
-        raise TLogFormatError(self.Line, self.Column, self.EntryNumber, "unexpected character: " + char)
-    elif char == '\n':
-      self.__FinishEntry(self.__PRE_FIELD)
-
   def __HandleLineComment(self, char):
     if char == '\n':
-      self.__state = self.__PRE_FIELD
+      self.__state = self.__PRE_RECORD
 
   __Handlers = {
-    __PRE_FIELD:            __HandlePreField,
+    __PRE_RECORD:           __HandlePreRecord,
     __FIELD:                __HandleField,
     __FIELD_ESCAPE:         __HandleFieldEscape,
-    __POST_FIELD_PRE_COLON: __HandlePostFieldPreColon,
     __LINE_COMMENT:         __HandleLineComment
    }
 
 class TLogWriter(object):
 
-  __CHAR_TO_ESCAPE_MAP = dict(itertools.chain(
-    ((c, '\\' + c) for c in TLogParser._COMMENT_CHARS),
-    [('"', '\\"')]
-   ))
+  __CHAR_TO_ESCAPE_MAP = dict(
+    (c, '\\' + c) for c in itertools.chain(TLogParser._COMMENT_CHARS, (':', '\n'))
+   )
+  __COMMENT_PREFIX = list(TLogParser._COMMENT_CHARS)[0] + ' '
 
   def __init__(self, stream=None):
     self.__stream = stream
@@ -823,27 +817,21 @@ class TLogWriter(object):
   def SetStream(self, stream):
     self.__stream = stream
 
-  # TODO Remove the generator prohibition.
   def Write(self, fields):
-    if len(fields) == 1:
-      self.__WriteField(field, True) if fields[0] else self.__stream.write('""')
-    else:
-      for index, field in enumerate(fields, 1):
-        self.__WriteField(field, index == len(fields))
+    is_trailing_field = False
+    for field in fields:
+      text = str(field)
+      if is_trailing_field:
+        self.__stream.write(':')
+      for char in text:
+        self.__stream.write(self.__CHAR_TO_ESCAPE_MAP.get(char, char))
+      is_trailing_field = True
     self.__stream.write('\n')
 
-  def __WriteEncodedString(self, text):
-    for char in text:
-      self.__stream.write(self.__CHAR_TO_ESCAPE_MAP.get(char, char))
-
-  def __WriteField(self, field, is_final_field):
-    data = str(field)
-    if data:
-      self.__stream.write('"')
-      self.__WriteEncodedString(data)
-      self.__stream.write('":' if not is_final_field else '"')
-    elif not is_final_field:
-      self.__stream.write(':')
+  def WriteComment(self, text):
+    self.__stream.write(self.__COMMENT_PREFIX)
+    self.__stream.write(text)
+    self.__stream.write('\n')
 
   @property
   def Stream(self):
