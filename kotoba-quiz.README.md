@@ -198,8 +198,8 @@ Flashcard Files
 
 _言葉 flashcards_ are simple two-sided flashcards containing:
 
-1. 前：the front of the card;
-2. 後ろ：the back of the card; and
+1. `前`：the front of the card;
+2. `後ろ`：the back of the card; and
 3. `Source`：the source of the flashcard (e.g., a friend, 先生, or yourself)
 
 You can put anything you want into the two sides.  However, the algorithms and
