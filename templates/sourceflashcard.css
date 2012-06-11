@@ -1,0 +1,89 @@
+/* This CSS file provides basic styles for sourced flashcards. */
+
+body {
+  margin: 0px;
+  padding: 0px;
+  width: 100%;
+  height: 100%;
+}
+
+div.toplevel {
+  position: absolute;
+  margin: auto;
+  top: 0px;
+  bottom: 0px;
+  left: 0px;
+  right: 0px;
+  text-align: center;
+  background: #c0c0c0;
+  padding: 10px 15px;
+}
+
+div.card {
+  display: inline-block;
+  vertical-align: middle;
+  padding: 10px 15px;
+  border: #a0a0a0 solid 1px;
+  background: #f5f5f5;
+}
+
+div.card div.stats {
+  display: inline-block;
+  font-size: medium;
+  text-align: center;
+  margin: 0.5em 0.5em;
+}
+
+div.front {
+  font-size: xx-large;
+  text-align: center;
+  border: black solid 1px;
+  padding: 0.5em 0.5em;
+  margin: 1em 1em;
+}
+
+div.back {
+  display: inline;
+  font-size: large;
+  text-align: center;
+}
+
+div.source {
+  display: inline;
+  font-size: large;
+  text-align: center;
+}
+
+div.selectors {
+  font-size: medium;
+  text-align: center;
+  margin: 1em 2em;
+  padding: 0.5em 0.5em;
+}
+
+/*
+ * The next three styles are for performance statistics displays.
+ */
+/* the number of cards that the user answered correctly */
+span.passed {
+  color: green;
+}
+
+/* the number of cards that the user answered incorrectly */
+span.failed {
+  color: red;
+}
+
+/* the number of cards that the user has seen */
+span.seen {
+  color: blue;
+}
+
+/*
+ * This special style is used to highlight 漢字 when the user hovers his
+ * mouse over them.
+ */
+span.kanji:hover {
+  color: blue;
+}
+

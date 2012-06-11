@@ -5,13 +5,13 @@
 Summary
 -------
 
-This command line tool scans 月詠 configuration and log files for 漢字 (kanji)
-characters and downloads their stroke order diagrams (SODs) from one or more
-sources on the Internet.  The tool organizes downloaded images into a simple
-directory structure.  Other 月詠 tools can use the downloaded SODs instead
-of linking to remote SODs provided through the Internet.  This sacrifices
-disk space to reduce bandwidth consumption and the risk of inaccessible SODs
-due to failed Internet connections or unavailable servers.
+This command line tool scans text files for 漢字 (kanji) characters and
+downloads their stroke order diagrams (SODs) from one or more sources on the
+Internet.  The tool organizes downloaded images into a simple directory
+structure.  Other 月詠 tools can use the downloaded SODs instead of linking
+to remote SODs provided through the Internet.  This sacrifices disk space to
+reduce bandwidth consumption and the risk of inaccessible SODs due to failed
+Internet connections or unavailable servers.
 
 Note that it is your responsibility to ensure that you have permission to
 download and use SODs.  Many of the images are copyrighted; please contact
@@ -77,23 +77,24 @@ Configuration Files
 
 The SOD downloader expects the user to provide a special configuration file
 describing the tool's behavior and the structure of the directory containing
-the downloaded SODs.  The configuration file's root must be named
-"image-settings" and may contain the following attributes:
+the downloaded SODs.  The configuration file should contain three sections:
 
-1. _image-directory_: This attribute specifies a path to the directory that
+1. _enabled-sources_: Each setting in this section specifies a remote source
+   of 漢字 stroke order diagrams.  The downloader will only check and use
+   these sources.  See the "Available Sources" section below for a list of
+   acceptable sources.
+2. _files_: Each setting in this section is the path to a file or directory
+   that will be scanned for 漢字.  If a path refers to a directory, then all
+   files in the directory's subtree will be scanned.
+3. _general_: This section contains general downloader settings.
+
+The _general_ section's settings are:
+
+1. _image-directory_: This setting specifies a path to the directory that
    will contain downloaded SODs.  (See the Image Directories section for
    information about the layouts of image directories.)  The directory
    must exist.
-2. _configuration-files_ (optional): This section specifies zero or more
-   paths to configuration files that will be scanned for 漢字.  漢字 within
-   comments will be ignored.  This section must not contain subsections.
-3. _log-files_ (optional): This section specifies zero or more paths to
-   log files that will be scanned for 漢字.  漢字 within comments will be
-   ignored.  This section must not contain subsections.
-4. _enabled-sources_: This section specifies zero or more sources from which
-   SODs will be downloaded.  See the Available Sources section for a list
-   of recognized sources.
-5. _timeout_ (optional): This attribute specifies a positive integral
+2. _timeout_ (optional): This attribute specifies a positive integral
    timeout (in seconds) for downloads.  The default value is thirty seconds.
 
 All paths in the configuration file are either absolute or relative to
@@ -101,21 +102,15 @@ the directory containing the configuration file.
 
 Here is a sample configuration file:
 
->     "image-settings" {
-        "configuration-files" {
-          "./flashcards.txt";
-          "./config.txt"
-        }
-        "log-files" {
-          "./flashcards.log"
-        }
-        "enabled-sources" {
-          "jisho.org";
-          "saiga-jp.com"
-        }
-        "image-directory" { "/home/tsukuyomi/img" }
-        "timeout" { "45" }
-    }
+>     [enabled-sources]
+>     jisho.org
+>     saiga-jp.com
+>     
+>     [files]
+>     kotoba-flashcards
+>     
+>     [general]
+>     image-directory: 漢字
 
 
 

@@ -33,25 +33,18 @@ run Python commands from terminals can use 月詠.
 
 A few principles guide 月詠:
 
-1. _Minimalism_: Do not waste time building general-purpose frameworks
-   or pretty [UI](http://en.wikipedia.org/wiki/User_interface)s for
-   one-off projects: Useful abstractions can be generalized and UIs can
-   be improved later.  Instead, focus on _solving problems_ with sensible,
-   straightforward, correct code and ensuring that UIs are _functional_.
-   Do not make applications more complex than they need to be.
-2. _Transparent, Portable Data Storage_: Application and user data should be
+1. _Transparent, Portable Data Storage_: Application and user data should be
    easy to parse and migrate to other applications.
-3. _Clarity_: Code and UIs should be thoroughly documented.
-4. _Freedom_: Open-source software should be truly open.  Anyone and any
+2. _Clarity_: Code and UIs should be thoroughly documented.
+3. _Freedom_: Open-source software should be truly open.  Anyone and any
    thing should be able to download, distribute, modify, and use it freely
    (as in
    ["free speech" _and_ "free beer"](http://en.wikipedia.org/wiki/Gratis_versus_libre)).
 
 In keeping with these principles, 月詠 features the following:
 
-1. 月詠 has no external dependencies other than the standard Python
-   interpreter: You do not need to download and manage a mess of
-   third-party libraries.
+1. 月詠 has only a few third-party dependencies.  (See the next section
+   for details.)
 2. 月詠 is not an Internet-facing application.  Its web-facing tools are
    single-[threaded](http://en.wikipedia.org/wiki/Thread_(computer_science\)),
    [blocking](http://en.wikipedia.org/wiki/Blocking_(computing\)),
@@ -68,7 +61,7 @@ In keeping with these principles, 月詠 features the following:
 3. All 月詠 modules are thoroughly documented.  Undocumented functions
    and out-of-date documentation are treated as bugs.
 4. All data is read from and written to plain text files with
-   well-documented, easy-to-parse formats.
+   standard, well-documented, easy-to-parse formats.
 5. Aside from its underlying [web framework], the core
    月詠 classes and functions are organized into a single Python source file.
    Each tool has its own script file.
@@ -111,9 +104,11 @@ tools, such as [Anki](http://ankisrs.net/) and
 Requirements
 ------------
 
-In keeping with the principle of minimalism, 月詠 has no external
-dependencies other than the standard Python libraries.  At the time
-this was written, 月詠 runs on the stable release of Python 3 (3.2).
+月詠 depends on these third-party libraries:
+
+* [Jinja2](http://jinja.pocoo.org), a templating engine
+
+At the time this was written, 月詠 runs on the stable release of Python 3 (3.2).
 It has not been tested with other versions of Python or any interpreters
 other than [CPython](http://www.python.org), the standard interpreter.
 
@@ -147,7 +142,7 @@ do not have such a font or it is not your browser's default
 Tools
 -----
 
-月詠 provides two tools:
+月詠 provides three tools:
 
 * **言葉 Flashcards**: This web-facing tool starts a local web server that
   serves two-sided flashcards in a simple quiz with a modified
@@ -157,6 +152,11 @@ Tools
   and downloads stroke order diagrams from one or more sources on the Internet.
   Other 月詠 tools can link to the downloaded stroke order diagrams instead of
   those served by remote Internet servers to speed up web page rendering.
+* **Two-Sided Flashcard Generator**: This command line tool transforms one
+  or more strings of Japanese text into two-sided flashcards suitable for
+  言葉 Flashcards flashcard files.  Each card's front is the unaltered
+  Japanese text and its back is the text with kanji replaced by furigana
+  wherever there are furigana annotations.
 
 Each tool is executed differently.  Please refer to each tool's README file
 for instructions.
@@ -171,152 +171,12 @@ File Formats
 ------------
 
 月詠 uses two kinds of files: configuration files and log files.
-
-
-### Configuration Files
-
-_Configuration files_ are structured UTF-8 text files that represent data
-as nodes within [trees](http://en.wikipedia.org/wiki/Tree_structure).
-They are similar to [XML](http://en.wikipedia.org/wiki/XML) and
-[HTML](http://en.wikipedia.org/wiki/HTML) files but are
-much easier to edit, parse, and read.
-
-There are two fundamental entities in configuration files:
-
-1. _Settings_: A _setting_ is a chunk of text.
-2. _Sections_: A _section_ is a chunk of text containing zero or more
-   settings and sections.
-
-Here is a simplified [grammar](http://en.wikipedia.org/wiki/Context-free_grammar)
-describing configuration files (`configuration-file` is the
-[start symbol](http://en.wikipedia.org/wiki/Context-free_grammar#Formal_definitions)):
-
->     configuration-file = section
-
->     section = DOUBLE-QUOTE TEXT DOUBLE-QUOTE OPENING-BRACE section-contents CLOSING-BRACE
-
->     section-contents =
-        EMPTY |
-        section section-contents |
-        setting SEMICOLON section-contents |
-        setting
-
->     setting = DOUBLE-QUOTE TEXT DOUBLE-QUOTE
-
->     DOUBLE-QUOTE = '"'
->     OPENING-BRACE = '{'
->     CLOSING-BRACE = '}'
->     SEMICOLON = ';'
-
-There are two special
-[terminals](http://en.wikipedia.org/wiki/Context-free_grammar#Formal_definitions)
-in the grammar.  `EMPTY` means what it
-says: It is an empty string (no characters).  `TEXT` is any arbitrary
-string of characters in which every occurrence of `DOUBLE-QUOTE` is
-escaped by a prefixed backslash ('\').  (Any character can be escaped with a
-backslash.)  For example, the string
-
->     Why is \"Hello, world!\" the universal first program?
-
-is a valid `TEXT` terminal because every `DOUBLE-QUOTE` is properly
-escaped.  When the escapes are removed, the text becomes:
-
->     Why is "Hello, world!" the universal first program?
-
-But
-
->     I said, "Hello, world!"
-
-is not a valid `TEXT` terminal because there are unescaped `DOUBLE-QUOTE`s
-within the string.
-
-Configuration files may contain comments.  A comment begins with
-`@` or `#` and proceeds to the end of the line (that is, up to and
-including the next newline [`\n`] in the file).  Comments cannot occur
-within `TEXT` terminals.  Comments are ignored by 月詠, so they can
-contain any valid UTF-8 text.
-
-There are a few things to note about configuration files:
-
-1. Every configuration file has exactly one top-level section called
-   the _root section_ (or simple the _root_).  XML and HTML are similar in
-   this respect.
-2. The `TEXT` preceding a section's `OPENING-BRACE` is called the
-   section's _name_.
-3. A section cannot contain sections with the same name.
-   In other words, if configuration files are viewed as trees with
-   sections as nodes, then two sections with the same name cannot have
-   the same parent.
-4. A section other than the root containing no sections and at most
-   one setting is called an _attribute_.  An attribute's setting is called
-   the attribute's _value_.  If an attribute does not contain a setting,
-   then it is said to have an _empty value_.
-5. The order in which settings and sections appear within a section's
-   `section-contents` might be relevant depending on how the file is
-   interpreted by applications.  XML and HTML are also similar in
-   this respect.
-6. Configuration files do not have anything resembling XML and HTML
-   DTDs, namespaces, schemas, or entities.
-7. Whitespace, including line breaks, is captured in `TEXT` terminals but
-   is ignored everywhere else.
-
-
-### Log Files
-
-_Log files_ are semi-structured UTF-8 text files that represent data
-as fields within records.  They are similar to
-[`/etc/passwd`](http://en.wikipedia.org/wiki//etc/passwd) files
-in [*NIX operating systems](http://en.wikipedia.org/wiki/*NIX).
-
-There are two fundamental entities in log files:
-
-1. _Fields_: A _field_ is a chunk of text.
-2. _Records_: A _record_ is a [tuple](http://en.wikipedia.org/wiki/Tuple)
-   of one or more fields.
-
-Here is a simplified [grammar](http://en.wikipedia.org/wiki/Context-free_grammar)
-describing log files (`log-file` is the
-[start symbol](http://en.wikipedia.org/wiki/Context-free_grammar#Formal_definitions)):
-
->     log-file = record-list
-
->     record-list = EMPTY | NEWLINE record-list | record record-list
-
->     record = field NEWLINE | possibly-empty-field COLON trailing-fields NEWLINE
-
->     field = TEXT
-
->     empty-field = EMPTY
-
->     possibly-empty-field = empty-field | field
-
->     trailing-fields = empty-field | possibly-empty-field COLON trailing-fields
-
->     COLON = ':'
->     NEWLINE = '\n'
-
-There are two special
-[terminals](http://en.wikipedia.org/wiki/Context-free_grammar#Formal_definitions)
-in the grammar.  `EMPTY` means what it
-says: It is an empty string (no characters).  `TEXT` is any arbitrary
-string of characters, including whitespace.  Any character can be escaped with a
-backslash.  For example, the string
-
->     Why is "Hello, world!" the universal first program?  This is why\: it's easy.
-
-is a valid `TEXT` terminal.
-
-Log files may contain comments.  A comment begins with
-`@` or `#` and proceeds to the end of the line (that is, up to and
-including the next `NEWLINE` in the file).  Comments cannot occur
-within `TEXT` terminals.  Comments are ignored by 月詠, so they can
-contain any valid UTF-8 text.
-
-Note that all whitespace except `NEWLINE` is captured in `TEXT` terminals.
-`NEWLINE`s may be escaped.  Lines containing nothing but whitespace are
-considered records, each containing a single `FIELD` holding the whitespace
-found on the line.  Whitespace at the end of a line is considered part of that
-line's record's last field.
+_Configuration files_ use the format parsed by Python's standard
+[configparser](http://docs.python.org/py3k/library/configparser.html)
+library.  Interpolation is disabled by default and settings with empty
+values are permitted.  _Log files_ use the "unix" CSV dialect as
+described by Python's standard
+[csv](http://docs.python.org/py3k/library/csv.html) library.
 
 
 
@@ -326,6 +186,7 @@ Repository Layout
 Aside from its underlying [web framework], the core 月詠 algorithms reside
 in a single Python file, `tsukuyomi.py`.  The major code sections are delimited
 by wide horizontal rules.  Each tool resides in its own Python source file.
+Web page templates, CSS, and JS files reside in the "templates" subdirectory.
 
 
 

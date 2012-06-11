@@ -1,0 +1,22 @@
+{#
+  This HTML template file generates a series of labeled radio buttons each of
+  whose IDs are "prefixN", where 'prefix' is a string template parameter and 'N'
+  is the button's zero-based index within the series.  It is meant to be used
+  within the flashcard deck configuration page, deckconfig.html.
+
+  This template expects the following parameters:
+
+    radio_set_name :: str
+      the name for the set of radio buttons
+    prefix :: str
+      a string that is prefixed to each radio button's id
+    remote_sources :: [str]
+      a sequence of strings that act both as the labels and values for the
+      radio buttons #}
+
+{% for source in remote_sources %}
+  <input type="radio" name="{{ radio_set_name }}" id="{{ prefix }}{{ loop.index0 }}" {% if loop.index0 == 0 %}checked="checked" {% endif %}value="{{ source }}" />
+  <label for="{{ prefix }}{{ loop.index0 }}">{{ source }}</label>
+  <br />
+{% endfor %}
+

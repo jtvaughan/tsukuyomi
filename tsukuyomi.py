@@ -20,11 +20,14 @@ __license__ = "Public Domain"
 
 import argparse
 import collections
+import configparser
+import csv
 import errno
 import hashlib
 import heapq
 import io
 import itertools
+import jinja2
 import os
 import os.path
 import random
@@ -33,16 +36,47 @@ import time
 import urllib.parse
 import urllib.request
 
-if __name__ == "__main__":
-  sys.path = [os.path.realpath(__file__)] + sys.path
+dirname = os.path.realpath(os.path.dirname(__file__))
+sys.path = [dirname] + sys.path
 
 from bottle import *
 
 
 
 ################################################################################
+# Useful globals
+################################################################################
+
+TemplateDirectory = os.path.join(dirname, "templates")
+JinjaEnvironment = jinja2.Environment(loader=jinja2.FileSystemLoader(TemplateDirectory))
+
+
+
+################################################################################
 # Miscellaneous Functions
 ################################################################################
+
+def ConstructConfigurationParser():
+  """Construct a configparser.ConfigParser with correct default settings."""
+  return configparser.ConfigParser(interpolation=None, allow_no_value=True)
+
+def ConstructLogParser(log_file):
+  """Construct a csv.reader with correct default settings for the specified file-like object."""
+  return csv.reader(log_file, dialect='unix')
+
+def ConstructLogWriter(log_file):
+  """Construct a csv.writer with correct default settings for the specified file-like object."""
+  return csv.writer(log_file, dialect='unix')
+
+def ForEachConfigurationSetting(config, section_name, callback):
+  """ Invoke the specified callback for each setting in the specified section of the specified configuration file object.
+      The callback must accept two parameters: the name of the setting and
+      its value.  This method does not invoke the callback if the specified
+      section does not exist or has no settings."""
+  if section_name in config:
+    section = config[section_name]
+    for key in section:
+      callback(key, section[key])
 
 def EnsureAbsolutePath(path, base):
   """ Convert a path into an absolute path if it is not one already.
@@ -236,608 +270,6 @@ class TRandomSelector(object):
     return self.__capacity
 
 
-################################################################################
-# Configuration file data structures and algorithms
-################################################################################
-
-class TSection(object):
-  """ Instances of this class represent sections within configuration files.
-      As explained in README.md, configuration file sections are like inner
-      nodes within N-ary trees.  Each section may contain settings (strings)
-      or sections.  The only restriction is that the contained sections cannot
-      share the same name."""
-
-  def __init__(self, name):
-    """ Construct an empty TSection with the specified name string."""
-    self.__name = name
-    self.__children = []      # settings and sections in order
-    self.__sections = collections.OrderedDict()
-    self.__settings = []
-    super().__init__()
-
-  def AddSection(self, section):
-    """ Add the specified TSection to this section.  This raises
-        KeyError if this section already contains a section with the specified
-        TSection's name."""
-    assert isinstance(section, TSection)
-    assert section is not self
-    if self.__sections.setdefault(section.Name, section) is not section:
-      raise KeyError("duplicate section name: " + section.Name)
-    self.__children.append(section)
-
-  def AddSetting(self, setting):
-    """Append the specified setting string to this section."""
-    self.__settings.append(setting)
-    self.__children.append(setting)
-
-  def GetSection(self, name):
-    """ Get the section with the specified name.  This raises
-        KeyError if this section contains no section with the specified name."""
-    return self.__sections[name]
-
-  def HasSection(self, name):
-    """ Determine whether this section contains a section with the specified name."""
-    return name in self.__sections
-
-  def YieldSections(self):
-    """Get a generator that yields all of this section's sections in order."""
-    for name in reversed(self.__sections):
-      yield self.__sections[name]
-
-  def YieldSectionsReversed(self):
-    """Get a generator that yields all of this section's sections in reverse order."""
-    for section in self.__sections.values():
-      yield section
-
-  @property
-  def Children(self):
-    """a list of the section's settings and sections (read-only)"""
-    return self.__children
-
-  @property
-  def HasChildren(self):
-    """True if this section contains settings or sections, False otherwise"""
-    return bool(self.__children)
-
-  @property
-  def HasSections(self):
-    """True if this section contains sections, False otherwise"""
-    return bool(self.__sections)
-
-  @property
-  def HasSettings(self):
-    """True if this section has settings, False otherwise"""
-    return bool(self.__settings)
-
-  @property
-  def IsAttribute(self):
-    """True if this section is an attribute (it contains one setting and no sections), False otherwise"""
-    return len(self.Settings) == 1 and not self.HasSections
-
-  @property
-  def Name(self):
-    """this section's name string"""
-    return self.__name
-
-  @property
-  def Settings(self):
-    """a list of this section's settings (in order)"""
-    return self.__settings
-
-  @property
-  def Value(self):
-    """the value of this attribute (this section must be an attribute)"""
-    assert self.IsAttribute
-    return self.__settings[0]
-
-class TConfigurationFormatError(Exception):
-
-  def __init__(self, line, column, message):
-    self.__line = line
-    self.__column = column
-    self.__message = message
-    super().__init__(str(line) + ":" + str(column) + " " + message)
-
-  def __str__(self):
-    return str(self.Line) + ':' + str(self.Column) + ": " + self.Message
-
-  @property
-  def Column(self):
-    return self.__column
-
-  @property
-  def Line(self):
-    return self.__line
-
-  @property
-  def Message(self):
-    return self.__message
-
-class TConfigurationParser(object):
-
-  __START = 0
-  __PRE_NAME = 1
-  __NAME = 2
-  __NAME_ESCAPE = 3
-  __POST_NAME = 4
-  __LINE_COMMENT = 5
-
-  _COMMENT_CHARS = {'#', '@'}
-
-  def __init__(self, section_begin_callback, section_end_callback, setting_callback):
-    self.__section_begin_cb = section_begin_callback
-    self.__section_end_cb = section_end_callback
-    self.__setting_cb = setting_callback
-    self.__state = self.__START
-    self.__absolute_position = 1
-    self.__line = 1
-    self.__column = 1
-    self.__section_stack = []
-
-  def Finish(self):
-    if self.__state != self.__PRE_NAME or self.__section_stack:
-      raise TConfigurationFormatError(self.Line, self.Column, "Incomplete document")
-
-  def ParseFileAndFinish(self, file_path):
-    with open(file_path, "r") as f:
-      self.ParseStrings(f)
-    self.Finish()
-
-  def ParseString(self, text):
-    for char in text:
-      self.__Handlers[self.__state](self, char)
-      self.__absolute_position += 1
-      if char == '\n':
-        self.__line += 1
-        self.__column = 1
-      else:
-        self.__column += 1
-
-  def ParseStrings(self, text_generator):
-    for line in text_generator:
-      self.ParseString(line)
-
-  def SetCallbacks(self, callback_triple):
-    assert len(callback_triple) == 3
-    self.__section_begin_cb, self.__section_end_cb, self.__setting_cb = callback_triple
-
-  @property
-  def AbsolutePosition(self):
-    return self.__absolute_position
-
-  @property
-  def Callbacks(self):
-    return (self.__section_begin_cb, self.__section_end_cb, self.__setting_cb)
-
-  @property
-  def Column(self):
-    return self.__column
-
-  @property
-  def _CurrentSection(self):
-    assert self.__section_stack
-    return self.__section_stack[-1]
-
-  @property
-  def Line(self):
-    return self.__line
-
-  @property
-  def SectionBeginCb(self):
-    return self.__section_begin_cb
-
-  @SectionBeginCb.setter
-  def SectionBeginCb(self, cb):
-    self.__section_begin_cb = cb
-
-  @property
-  def SectionEndCb(self):
-    return self.__section_end_cb
-
-  @SectionEndCb.setter
-  def SectionEndCb(self, cb):
-    self.__section_end_cb = cb
-
-  @property
-  def SettingCb(self):
-    return self.__setting_cb
-
-  @SettingCb.setter
-  def SettingCb(self, cb):
-    self.__setting_cb = cb
-
-  def __HandleStart(self, char):
-    if not char.isspace():
-      if char == '"':
-        self.__name = io.StringIO()
-        self.__state = self.__NAME
-      elif char == '{':
-        raise TConfigurationFormatError(self.Line, self.Column, "Opening the top-level section without a name")
-      elif char == '}':
-        raise TConfigurationFormatError(self.Line, self.Column, "Closing the top-level section without opening it")
-      elif char in self._COMMENT_CHARS:
-        self.__prior_state = self.__state
-        self.__state = self.__LINE_COMMENT
-      else:
-        raise TConfigurationFormatError(self.Line, self.Column, "Unexpected character at the top level: '" + char + "'")
-
-  def __HandlePreName(self, char):
-    if not char.isspace():
-      if char == '"':
-        self.__name = io.StringIO()
-        self.__state = self.__NAME
-      elif char == '}':
-        if not self.__section_stack:
-          raise TConfigurationFormatError(self.Line, self.Column, "Closing a nonexistent section at the top level")
-        else:
-          self.__section_end_cb(self.__section_stack.pop())
-      elif char in self._COMMENT_CHARS:
-        self.__prior_state = self.__state
-        self.__state = self.__LINE_COMMENT
-      else:
-        raise TConfigurationFormatError(self.Line, self.Column, "Unexpected character: '" + char + "'")
-
-  def __HandleName(self, char):
-    if char == '\\':
-      self.__state = self.__NAME_ESCAPE
-    elif char == '"':
-      self.__state = self.__POST_NAME
-    else:
-      self.__name.write(char)
-
-  def __HandleNameEscape(self, char):
-    self.__name.write(char)
-    self.__state = self.__NAME
-
-  def __HandlePostName(self, char):
-    if not char.isspace():
-      if char == ';':
-        if not self.__section_stack:
-          raise TConfigurationFormatError(self.Line, self.Column, "Setting found in the top level")
-        else:
-          self.__state = self.__PRE_NAME
-          setting = self.__name.getvalue()
-          self.__setting_cb(setting, self.__section_stack[-1])
-      elif char == '{':
-        self.__state = self.__PRE_NAME
-        section = TSection(self.__name.getvalue())
-        try:
-          self.__section_begin_cb(section, self.__section_stack[-1] if self.__section_stack else None)
-        finally:
-          self.__section_stack.append(section)
-      elif char == '}':
-        if not self.__section_stack:
-          raise TConfigurationFormatError(self.Line, self.Column, "Closing a nonexistent section")
-        else:
-          setting = self.__name.getvalue()
-          self.__state = self.__PRE_NAME
-          try:
-            self.__setting_cb(setting, self.__section_stack[-1])
-          finally:
-            section = self.__section_stack.pop()
-          self.__section_end_cb(section)
-      elif char in self._COMMENT_CHARS:
-        self.__prior_state = self.__state
-        self.__state = self.__LINE_COMMENT
-      else:
-        raise TConfigurationFormatError(self.Line, self.Column, "Unexpected character")
-
-  def __HandleLineComment(self, char):
-    if char == '\n':
-      self.__state = self.__prior_state
-
-  __Handlers = {
-    __START:        __HandleStart,
-    __PRE_NAME:     __HandlePreName,
-    __NAME:         __HandleName,
-    __NAME_ESCAPE:  __HandleNameEscape,
-    __POST_NAME:    __HandlePostName,
-    __LINE_COMMENT: __HandleLineComment
-   }
-
-class TConfigurationDOMParser(TConfigurationParser):
-  """ Instances of this configuration file parser read entire section trees into memory.
-      They are akin to XML DOM parsers."""
-
-  def __init__(self):
-    """ Construct a configuration file parser.  The client must invoke the
-        regular TConfigurationParser methods (ParseString(), ParseStrings(),
-        Finish(), etc.) to actually parse content."""
-    self.__root = None
-    def SectionBeginHandler(section, parent):
-      if not self.__root:
-        self.__root = section
-      else:
-        assert parent is not None
-        try:
-          parent.AddSection(section)
-        except KeyError as e:
-          raise RuntimeError("Duplicate section name")
-    def SectionEndHandler(section):
-      pass
-    def SettingHandler(setting, section):
-      section.AddSetting(setting)
-    super().__init__(SectionBeginHandler, SectionEndHandler, SettingHandler)
-
-  @property
-  def Root(self):
-    """the root section of the parsed configuration file (only valid after Finish() is invoked)"""
-    return self.__root
-
-def WriteConfiguration(fobj, section, pretty_print=False, tab_size=2):
-  """ Write a configuration file to the specified file-like object.  'fobj' must
-      be a file-like object open for writing.  'section' is the root of the
-      configuration file.  'pretty_print' is a boolean specifying whether the
-      configuration file should be "pretty printed" (whitespace and newlines
-      added).  If 'pretty_print' is True, then 'tab_size' specifies the number
-      of spaces per generated tab; otherwise, 'tab_size' is ignored."""
-  assert isinstance(section, TSection)
-
-  escape_map = dict(itertools.chain(
-    ((c, '\\' + c) for c in TConfigurationParser._COMMENT_CHARS),
-    [('"', '\\"')]
-   ))
-
-  def WriteEncodedString(text):
-    for c in text:
-      fobj.write(escape_map.get(c, c))
-
-  num_tabs = 0
-  if pretty_print:
-    section_open_text = '" {'
-    section_close_text = '}\n'
-    empty_section_text = '" {}'
-    attribute_begin_text = '" { "'
-    attribute_end_text = '" }\n'
-    tab = ' ' * tab_size
-    def WriteTabbed(text):
-      fobj.write(tab * num_tabs + text)
-    def WriteEndOfLine(text):
-      fobj.write(text + '\n')
-  else:
-    section_open_text = '"{'
-    section_close_text = '}'
-    empty_section_text = '"{}'
-    attribute_begin_text = '"{"'
-    attribute_end_text = '"}'
-    def WriteTabbed(text):
-      fobj.write(text)
-    def WriteEndOfLine(text):
-      fobj.write(text)
-
-  def CloseSection():
-    nonlocal num_tabs
-    num_tabs -= 1
-    WriteTabbed(section_close_text)
-
-  section_stack = [(False, 0, 0, section)]
-
-  def WriteChildren(section, start_index):
-    for child_index, child in enumerate(section.Children[start_index:], start_index):
-      if isinstance(child, str):
-        WriteTabbed('"')
-        WriteEncodedString(child)
-        if child_index != len(section.Children) - 1:
-          WriteEndOfLine('";')
-        else:
-          WriteEndOfLine('"')
-      else:
-        assert isinstance(child, TSection)
-        section_stack.append((True, num_tabs, child_index + 1, section))
-        section_stack.append((False, num_tabs, 0, child))
-        return False
-    return True
-
-  while section_stack:
-    visited, num_tabs, last_child_index, section = section_stack.pop()
-    if visited:
-      if last_child_index == len(section.Children) or WriteChildren(section, last_child_index):
-        CloseSection()
-    else:
-      WriteTabbed('"')
-      WriteEncodedString(section.Name)
-      if section.HasChildren:
-        if len(section.Settings) == 1 and not section.HasSections:
-          fobj.write(attribute_begin_text)
-          WriteEncodedString(section.Settings[0])
-          fobj.write(attribute_end_text)
-        else:
-          WriteEndOfLine(section_open_text)
-          num_tabs += 1
-          if WriteChildren(section, last_child_index):
-            CloseSection()
-      else:
-        WriteEndOfLine(empty_section_text)
-
-
-
-################################################################################
-# Log file data structures and algorithms
-################################################################################
-
-class TLogFormatError(Exception):
-
-  def __init__(self, line, column, entry_number, message):
-    self.__line = line
-    self.__column = column
-    self.__record_number = entry_number
-    self.__message = message
-    super().__init__(str(line) + ":" + str(column) + " " + message)
-
-  @property
-  def Column(self):
-    return self.__column
-
-  @property
-  def RecordNumber(self):
-    return self.__record_number
-
-  @property
-  def Line(self):
-    return self.__line
-
-  @property
-  def Message(self):
-    return self.__message
-
-class TLogParser(object):
-
-  __PRE_RECORD = 0
-  __FIELD = 1
-  __FIELD_ESCAPE = 2
-  __LINE_COMMENT = 3
-
-  _COMMENT_CHARS = {'#', '@'}
-  __FINISH_STATES = {__PRE_RECORD, __FIELD, __LINE_COMMENT}
-
-  def __init__(self, record_callback):
-    self.__record_callback = record_callback
-    self.__state = self.__PRE_RECORD
-    self.__line = 1
-    self.__column = 1
-    self.__absolute_position = 1
-    self.__record = 1
-    self.__fields = []
-    self.__field_buffer = io.StringIO()
-    super().__init__()
-
-  def Finish(self):
-    if self.__state not in self.__FINISH_STATES:
-      raise TLogFormatError(self.Line, self.Column, self.RecordNumber, "finished in the middle of a character escape")
-    elif self.__state == self.__FIELD:
-      self.__FinishRecord(self.__PRE_RECORD)
-
-  def ParseFileAndFinish(self, file_path):
-    with open(file_path, "r") as f:
-      self.ParseStrings(f)
-    self.Finish()
-
-  def ParseString(self, text):
-    for char in text:      
-      self.__Handlers[self.__state](self, char)
-      self.__absolute_position += 1
-      if char == '\n':
-        self.__line += 1
-        self.__column = 1
-      else:
-        self.__column += 1
-
-  def ParseStrings(self, text_generator):
-    for line in text_generator:
-      self.ParseString(line)
-
-  def SetRecordCb(self, callback):
-    self.__record_callback = callback
-
-  @property
-  def AbsolutePosition(self):
-    return self.__absolute_position
-
-  @property
-  def RecordCb(self):
-    return self.__record_callback
-
-  @RecordCb.setter
-  def RecordCb(self, record_callback):
-    self.__record_callback = record_callback
-
-  @property
-  def RecordNumber(self):
-    return self.__record
-
-  @property
-  def Column(self):
-    return self.__column
-
-  @property
-  def Line(self):
-    return self.__line
-
-  def __FinishRecord(self, new_state):
-    self.__FinishField()
-    self.__state = new_state
-    record = tuple(self.__fields)
-    self.__fields = []
-    self.__record += 1
-    self.RecordCb(record)
-
-  def __FinishField(self):
-    self.__fields.append(self.__field_buffer.getvalue())
-    self.__field_buffer = io.StringIO()
-
-  def __HandlePreRecord(self, char):
-    if char != '\n':
-      if char in self._COMMENT_CHARS:
-        self.__state = self.__LINE_COMMENT
-      else:
-        self.__state = self.__FIELD
-        if char == ':':
-          self.__fields.append("")
-        else:
-          self.__HandleField(char)
-
-  def __HandleField(self, char):
-    if char == '\\':
-      self.__state = self.__FIELD_ESCAPE
-    elif char == ':':
-      self.__FinishField()
-    elif char in self._COMMENT_CHARS:
-      self.__FinishRecord(self.__LINE_COMMENT)
-    elif char == '\n':
-      self.__FinishRecord(self.__PRE_RECORD)
-    else:
-      self.__field_buffer.write(char)
-
-  def __HandleFieldEscape(self, char):
-    self.__field_buffer.write(char)
-    self.__state = self.__FIELD
-
-  def __HandleLineComment(self, char):
-    if char == '\n':
-      self.__state = self.__PRE_RECORD
-
-  __Handlers = {
-    __PRE_RECORD:           __HandlePreRecord,
-    __FIELD:                __HandleField,
-    __FIELD_ESCAPE:         __HandleFieldEscape,
-    __LINE_COMMENT:         __HandleLineComment
-   }
-
-class TLogWriter(object):
-
-  __CHAR_TO_ESCAPE_MAP = dict(
-    (c, '\\' + c) for c in itertools.chain(TLogParser._COMMENT_CHARS, (':', '\n'))
-   )
-  __COMMENT_PREFIX = list(TLogParser._COMMENT_CHARS)[0] + ' '
-
-  def __init__(self, stream=None):
-    self.__stream = stream
-    super().__init__()
-
-  def SetStream(self, stream):
-    self.__stream = stream
-
-  def Write(self, fields):
-    is_trailing_field = False
-    for field in fields:
-      text = str(field)
-      if is_trailing_field:
-        self.__stream.write(':')
-      for char in text:
-        self.__stream.write(self.__CHAR_TO_ESCAPE_MAP.get(char, char))
-      is_trailing_field = True
-    self.__stream.write('\n')
-
-  def WriteComment(self, text):
-    self.__stream.write(self.__COMMENT_PREFIX)
-    self.__stream.write(text)
-    self.__stream.write('\n')
-
-  @property
-  def Stream(self):
-    return self.__stream
-
-
 
 ################################################################################
 # Data structures and algorithms for Japanese text
@@ -924,7 +356,7 @@ class T言葉と振り仮名Producer(object):
 
         1. 言葉：きょう(きょう)漢字を勉強する。　　 振り仮名：<Nothing>"""
 
-  def __init__(self, 振り仮名start, 振り仮名end):
+  def __init__(self, 振り仮名start='[', 振り仮名end=']'):
     """ Construct a new parser using the specified 振り仮名 delimiter characters.
         The characters must be single-character strings."""
     self.__漢字 = False
@@ -999,6 +431,17 @@ class T言葉と振り仮名Producer(object):
               self.__ResetBuffer()
               self.__buffer.write(char)
 
+  def ProcessAndReset(self, text):
+    """ Invoke Process() for the specified iterable of characters, reset the processor, and return the results.
+        This combines Process(), Finish(), and Reset() into one method."""
+    try:
+      self.Process(text)
+      self.Finish()
+      results = self.Results
+    finally:
+      self.Reset()
+    return results
+
   def Reset(self):
     """Reset the parser and empty the Results list."""
     self.__漢字 = False
@@ -1022,7 +465,7 @@ class T言葉と振り仮名Producer(object):
 
 def GenerateHTML5Ruby(言葉と振り仮名sequence, buf, kanji_class,
  kanji_onclick_generator, kanji_onmouseover_generator,
- kanji_onmouseout_generator, 振り仮名のクラス, 振り仮名を見える=True):
+ kanji_onmouseout_generator, 振り仮名のクラス, 振り仮名が見える=True):
   """ Write HTML5 ruby-annotated text from the specified iterable of
       T言葉と振り仮名 into the specified buffer.  振り仮名のクラス should be a
       valid CSS class name: It will be the value of each rt tag's
@@ -1030,18 +473,18 @@ def GenerateHTML5Ruby(言葉と振り仮名sequence, buf, kanji_class,
       HTML5 text will ensure that the 振り仮名 is initially visible via
       the "style" tag attribute; otherwise, the generated HTML5 text
       will ensure that the 振り仮名 is hidden."""
-  visible = ('" style="visibility:visible;">' if 振り仮名を見える else '" style="visibility:hidden;">')
+  visible = ('" style="visibility:visible;">' if 振り仮名が見える else '" style="visibility:hidden;">')
   rt_start = '<rp class="' + 振り仮名のクラス + visible + ' (</rp><rt class="' + 振り仮名のクラス + visible
   rt_end = '<rp class="' + 振り仮名のクラス + visible + ') </rp></rt></ruby>'
 
   def Write漢字(字):
-    buf.write(
-      '<span class=\"' + kanji_class +
-      '" onclick="' + kanji_onclick_generator(字) +
-      ('" onmouseover="' + kanji_onmouseover_generator(字) if kanji_onmouseover_generator is not None else '') +
-      ('" onmouseout="' + kanji_onmouseout_generator(字) + '">' if kanji_onmouseout_generator is not None else '">') +
-      字 + '</span>'
-     )
+    buf.write('<span class=\"')
+    buf.write(kanji_class)
+    buf.write('" onclick="' + kanji_onclick_generator(字) if kanji_onclick_generator is not None else '')
+    buf.write('" onmouseover="' + kanji_onmouseover_generator(字) if kanji_onmouseover_generator is not None else '')
+    buf.write('" onmouseout="' + kanji_onmouseout_generator(字) + '">' if kanji_onmouseout_generator is not None else '">')
+    buf.write(字)
+    buf.write('</span>')
 
   for ペア in 言葉と振り仮名sequence:
     if ペア.振り仮名:
@@ -1055,114 +498,6 @@ def GenerateHTML5Ruby(言葉と振り仮名sequence, buf, kanji_class,
     else:
       for 字 in ペア.言葉:
         (Write漢字 if ord(字) in KANJI_RANGE else buf.write)(字)
-
-
-
-################################################################################
-# Functions for processing stroke order diagram configuration files
-################################################################################
-
-class TStrokeOrderDiagramFSInfo(object):
-
-  def __init__(self, 設定ファイルのパス):
-    # Flags and default settings
-    self.__設定ファイル = []
-    self.__タイムアウト = None
-    self.__ログファイル = []
-    configuration_files_specified = False
-    self.__enabled_sources = []
-    enabled_sources_specified = False
-    self.__image_directory = None
-    log_files_specified = False
-    self.__設定ファイルのディレクトリ = os.path.abspath(os.path.dirname(設定ファイルのパス))
-
-    # Parse the configuration file.
-    def ProcessSection(section, パス名, PrintErrorAndExit):
-      nonlocal configuration_files_specified
-      nonlocal enabled_sources_specified
-      nonlocal log_files_specified
-
-      if section.Name == "configuration-files":
-        if section.HasSections:
-          PrintErrorAndExit("configuration-files cannot have subsections.")
-        if configuration_files_specified:
-          PrintErrorAndExit("configuration-files must be specified once.")
-        configuration_files_specified = True
-        for 設定ファイルのパス名 in section.Settings:
-          self.__設定ファイル.append(os.path.join(self.__設定ファイルのディレクトリ, 設定ファイルのパス名))
-
-      elif section.Name == "enabled-sources":
-        if section.HasSections:
-          PrintErrorAndExit("enabled-sources cannot have subsections.")
-        if enabled_sources_specified:
-          PrintErrorAndExit("enabled-sources must be specified once.")
-        enabled_sources_specified = True
-        for source in section.Settings:
-          if source not in RemoteSources:
-            PrintErrorAndExit("This image source is not known: " + source)
-          self.__enabled_sources.append(source)
-
-      elif section.Name == "image-directory":
-        if not section.IsAttribute:
-          PrintErrorAndExit("image-directory must be an attribute.")
-        if self.__image_directory is not None:
-          PrintErrorAndExit("image-directory must be specified once.")
-        self.__image_directory = EnsureAccessibleAbsoluteDirectoryPath(section.Value, self.__設定ファイルのディレクトリ, os.R_OK, path_title="image-directory")
-
-      elif section.Name == "log-files":
-        if section.HasSections:
-          PrintErrorAndExit("log-files cannot have subsections.")
-        if log_files_specified:
-          PrintErrorAndExit("log-files must be specified once.")
-        log_files_specified = True
-        for ログファイルのパス名 in section.Settings:
-          self.__ログファイル.append(os.path.join(self.__設定ファイルのディレクトリ, ログファイルのパス名))
-
-      elif section.Name == "timeout":
-        if not section.IsAttribute:
-          PrintErrorAndExit("timeout must be an attribute.")
-        if self.__タイムアウト is not None:
-          PrintErrorAndExit("timeout must be specified once.")
-        try:
-          self.__タイムアウト = int(section.Value)
-        except ValueError:
-          PrintErrorAndExit("timeout is not a number: " + section.Value)
-
-    ツールの設定ファイルを分析する(設定ファイルのパス, "image-settings", False, ProcessSection)
-
-    # Validate settings.
-    if not enabled_sources_specified and (self.__設定ファイル or self.__ログファイル):
-      sys.stderr.write("すみません、you must enable at least one source in the 設定ファイル.")
-      sys.exit(2)
-    self.__image_directory = os.path.join(self.__設定ファイルのディレクトリ, self.__image_directory)
-    EnsureIsImageDirectory(self.__image_directory)
-    if self.__タイムアウト is None:
-      self.__タイムアウト = 30
-    super().__init__()
-
-  @property
-  def 設定ファイル(self):
-    return self.__設定ファイル
-
-  @property
-  def 設定ファイルのディレクトリ(self):
-    return self.__設定ファイルのディレクトリ
-
-  @property
-  def タイムアウト(self):
-    return self.__タイムアウト
-
-  @property
-  def ログファイル(self):
-    return self.__ログファイル
-
-  @property
-  def EnabledSources(self):
-    return self.__enabled_sources
-
-  @property
-  def ImageDirectory(self):
-    return self.__image_directory
 
 
 
@@ -1220,17 +555,10 @@ def DownloadSLJFAQDiagram(漢字, ファイルのパス名, タイムアウト):
       The download will timeout after タイムアウト seconds."""
   WriteDiagramFile(urllib.request.urlopen(GetSLJFAQURL(漢字), timeout=タイムアウト), ファイルのパス名)
 
-"""a dictionary mapping stroke order diagram sources to their download handlers and file extensions"""
-RemoteSources = {
-  "jisho.org": (DownloadJishoDotOrgDiagram, GetJishoDotOrgURL, "jpg"),
-  "saiga-jp.com": (DownloadSaigaJPDiagram, GetSaigaJPURL, "gif"),
-  "sljfaq.org": (DownloadSLJFAQDiagram, GetSLJFAQURL, "png")
- }
-
 
 
 ################################################################################
-# Functions for accessing 漢字 stroke order diagrams locally
+# A class for downloading 漢字 stroke order diagrams and managing them on disk
 ################################################################################
 
 """ This is the start of URL paths for 漢字 stroke order diagrams.  Clients that
@@ -1238,161 +566,180 @@ RemoteSources = {
     diagrams through this path.  See GetStrokeOrderDiagramURL()."""
 StrokeOrderDiagramURLBase = "/images/"
 
-def ConstructStrokeOrderDiagramPath(漢字, image_directory, source):
-  """ Get a string representing the path to the stroke order diagram for the specified 漢字 from the specified source.
-      The file might not exist."""
-  assert source in RemoteSources
-  return os.path.join(image_directory, source, 漢字 + os.extsep + RemoteSources[source][2])
+class TStrokeOrderDiagramFSInfo(object):
+  """ This class facilitates 漢字 stroke order diagram downloading and management.
+      It provides the standard way to parse image diagram filesystem
+      configuration files and convenient methods for initiating downloads."""
 
-def EnsureIsImageDirectory(image_directory):
-  """ Terminate the program if the specified path does not refer to an image directory."""
-  if not os.path.isdir(image_directory):
-    sys.stderr.write("image directory path does not refer to a directory: " + image_directory + "\n")
-    sys.exit(3)
+  """a dictionary mapping stroke order diagram sources to their download handlers and file extensions"""
+  RemoteSources = {
+    "jisho.org": (DownloadJishoDotOrgDiagram, GetJishoDotOrgURL, "jpg"),
+    "saiga-jp.com": (DownloadSaigaJPDiagram, GetSaigaJPURL, "gif"),
+    "sljfaq.org": (DownloadSLJFAQDiagram, GetSLJFAQURL, "png")
+   }
 
-def GetStrokeOrderDiagramSources(image_directory):
-  """ Get a list of sources from which 漢字 stroke order diagrams were downloaded.
-      'image_directory' must be a path to a root image directory that was
-      previously managed by the download-kanji-images.py tool."""
-  EnsureIsImageDirectory(image_directory)
-  sources = os.listdir(image_directory)
-  for source in sources:
-    if not os.path.isdir(os.path.join(image_directory, source)):
-      sys.stderr.write("image directory is corrupted: " + image_directory + ": " + source + " is not a directory\n")
+  def __init__(self, 設定ファイルのパス):
+    """ Construct a 漢字 stroke order diagram downloader that uses the specified configuration file's settings."""
+    # Flags and default settings
+    self.__設定ファイルのディレクトリ = os.path.abspath(os.path.dirname(設定ファイルのパス))
+    self.__タイムアウト = None
+    self.__ファイル = []
+    self.__enabled_sources = []
+    self.__image_directory = None
+
+    # Parse the configuration file.
+    def ProcessSettings(config, パス名, PrintErrorAndExit):
+      # Parse the configuration file.
+      def HandleSource(source, unused):
+        if source not in self.RemoteSources:
+          PrintErrorAndExit("This image source is not known: " + source)
+        self.__enabled_sources.append(source)
+      ForEachConfigurationSetting(config, 'enabled-sources', HandleSource)
+      ForEachConfigurationSetting(config, 'files',
+        lambda ファイル, _: self.__ファイル.append(EnsureAbsolutePath(ファイル, self.__設定ファイルのディレクトリ))
+       )
+      section = config['general'] if 'general' in config else {}
+      if 'timeout' in section:
+        try:
+          self.__タイムアウト = int(section['timeout'])
+        except ValueError:
+          PrintErrorAndExit("timeout is not a number: " + section['timeout'])
+      self.__image_directory = section.get('image-directory', None)
+
+    ツールの設定ファイルを分析する(設定ファイルのパス, ProcessSettings)
+
+    # Validate settings.
+    if not self.__enabled_sources and (self.__設定ファイル or self.__ログファイル):
+      sys.stderr.write("すみません、you must enable at least one source in the 設定ファイル.")
+      sys.exit(2)
+    self.__image_directory = os.path.join(self.__設定ファイルのディレクトリ, self.__image_directory)
+    if not os.path.isdir(self.__image_directory):
+      sys.stderr.write("This path does not refer to a directory: " + image_directory + "\n")
       sys.exit(3)
-    if source not in RemoteSources:
-      sys.stderr.write("image directory is corrupted: " + image_directory + ": " + source + " is not a recognized remote source\n")
-      sys.exit(3)
-  return sources
+    if self.__タイムアウト is None:
+      self.__タイムアウト = 30
+    super().__init__()
 
-def GetLocalStrokeOrderDiagramPaths(漢字, image_directory, enabled_sources):
-  """ Get a list of paths to locally-stored stroke order diagrams for the specified 漢字 character.
-      This function expects the following parameters:
+  def ConstructStrokeOrderDiagramPath(self, 字, source):
+    """ Get a string representing the path to the stroke order diagram for the specified 漢字 from the specified source.
+        The file might not exist."""
+    assert source in self.EnabledSources
+    return os.path.join(self.ImageDirectory, source, 字 + os.extsep + self.RemoteSources[source][2])
 
-        漢字 :: str
-          A single-character string containing a 漢字 character.
-        image_directory :: str
-          A path to the root image directory.  This directory must have been
-          managed by the download-kanji-images.py tool.
-        enabled_sources :: list<str>
-          A list of enabled image sources.  This function will only look for
-          kanji stroke order diagrams downloaded from these sources.
+  def Download(self, 漢字, source):
+    """ Download the stroke order diagrams for the 漢字 characters in the specified string from the specified source, which must be one of the EnabledSources."""
+    assert source in self.EnabledSources
+    source_dir = os.path.join(self.ImageDirectory, source)
+    if not os.path.exists(source_dir):
+      os.mkdir(source_dir)
+    for 字 in 漢字:
+      if ord(字) in KANJI_RANGE:
+        self.RemoteSources[source][0](字, self.ConstructStrokeOrderDiagramPath(字, source), self.タイムアウト)
 
-  """
-  assert len(漢字) == 1
-  assert ord(漢字) in KANJI_RANGE
-  local_sources = set(GetStrokeOrderDiagramSources(image_directory)) ^ set(enabled_sources)
-  漢字 = 漢字 + os.extsep
-  パス名 = []
-  for source in local_sources:
-    パス = GetStrokeOrderDiagramPath(漢字, image_directory, source)
-    if パス is not False:
-      パス名.append(パス)
-  return パス名
+  def Downloaded(self, 字, source):
+    """ Determine whether the specified 漢字's stroke order diagram has already been downloaded from the specified source."""
+    return self.GetStrokeOrderDiagramPath(字, source) is not False
 
-def GetStrokeOrderDiagramPath(漢字, image_directory, source):
-  """ Get the path to a stroke order diagram from the specified source for the specified 漢字.
-      This function expects the following parameters:
+  def GetLocalStrokeOrderDiagramPaths(self, 字):
+    """ Get a list of paths to locally-stored stroke order diagrams for the specified 漢字 character."""
+    assert len(字) == 1
+    assert ord(字) in KANJI_RANGE
+    local_sources = set(self.GetStrokeOrderDiagramSources()) ^ set(self.EnabledSources)
+    字 = 字 + os.extsep
+    パス名 = []
+    for source in local_sources:
+      パス = self.GetStrokeOrderDiagramPath(字, source)
+      if パス is not False:
+        パス名.append(パス)
+    return パス名
 
-        漢字 :: str
-          A single-character string containing a 漢字 character.
-        image_directory :: str
-          A path to the root image directory.  This directory must have been
-          managed by the download-kanji-images.py tool.
-        source :: str
-          A stroke order diagram source.
+  def GetStrokeOrderDiagramPath(self, 字, source):
+    """ Get the path to a stroke order diagram from the specified source for the specified 漢字.
+        This function returns the path to the stroke order diagram if it is found.
+        Otherwise, this function returns False."""
+    assert len(字) == 1
+    assert ord(字) in KANJI_RANGE
+    assert source in self.EnabledSources
+    パス = self.ConstructStrokeOrderDiagramPath(字, source)
+    return パス if os.path.isfile(パス) else False
 
-      This function returns the path to the stroke order diagram if it is found.
-      Otherwise, this function returns False.
-  """
-  assert len(漢字) == 1
-  assert ord(漢字) in KANJI_RANGE
-  assert source in RemoteSources
+  def GetStrokeOrderDiagramSources(self):
+    """ Get a list of sources from which 漢字 stroke order diagrams were downloaded.
+        'image_directory' must be a path to a root image directory that was
+        previously managed by the download-kanji-images.py tool."""
+    sources = os.listdir(self.ImageDirectory)
+    for source in sources:
+      if not os.path.isdir(os.path.join(self.ImageDirectory, source)):
+        sys.stderr.write("image directory is corrupted: " + self.ImageDirectory + ": " + source + " is not a directory\n")
+        sys.exit(3)
+      if source not in self.RemoteSources:
+        sys.stderr.write("image directory is corrupted: " + self.ImageDirectory + ": " + source + " is not a recognized remote source\n")
+        sys.exit(3)
+    return sources
 
-  パス = ConstructStrokeOrderDiagramPath(漢字, image_directory, source)
-  return パス if os.path.isfile(パス) else False
+  def GetStrokeOrderDiagramURL(self, 字, source):
+    """ Get a URL to the stroke order diagram from the specified source for the specified 漢字.
+        This function returns a string representing a URL.  The URL will be the
+        contatenation of the string specified by the global variable
+        StrokeOrderDiagramURLBase, the source (URL quoted, UTF-8 encoding),
+        a "/", and the string representation of the integral value of 字
+        (UTF-8 encoding) if there is a local stroke order diagram for 字.
+        If no local stroke order diagram exists for the specified
+        字 from the specified source, then the returned URL will refer to a
+        remote stroke order diagram from the specified source."""
+    assert len(字) == 1
+    assert ord(字) in KANJI_RANGE
+    assert source in self.EnabledSources
+    パス = self.GetStrokeOrderDiagramPath(字, source)
+    return (
+      self.RemoteSources[source][1](字)
+       if パス is False
+       else StrokeOrderDiagramURLBase + urllib.parse.quote(source) + "/" + str(ord(字))
+     )
 
-def GetStrokeOrderDiagramURL(漢字, image_directory, source):
-  """ Get a URL to the stroke order diagram from the specified source for the specified 漢字.
-      This function expects the following parameters:
+  def ServeStrokeOrderDiagram(self, 字, source):
+    """ Serve the locally-stored stroke order diagram for the specified 漢字.
+        字 must be the Unicode code point of a 漢字 expressed as an integer.
+        This function must be invoked while handling a GET request.
+        If all of the parameters are valid, then this will serve the stroke
+        order diagram for the specified 漢字: The return value will be the
+        value returned by Bottle's static_file() function.  If 'source'
+        is None but 字 is valid, then this function will return the empty
+        string.  Otherwise, an HTTP error will be generated."""
+    try:
+      字 = chr(int(字))
+    except Exception as e:
+      abort(400, "invalid 漢字 encoding")
+    if len(字) != 1:
+      abort(400, "not a single-character 漢字")
+    if ord(字) not in KANJI_RANGE:
+      abort(400, "not 漢字")
+    data = ""
+    if source is not None and source in self.EnabledSources:
+      local_path = self.GetStrokeOrderDiagramPath(字, source)
+      if local_path is not False:
+        data = static_file(os.path.basename(local_path), os.path.dirname(local_path))
+    return data
 
-        漢字 :: str
-          A single-character string containing a 漢字 character.
-        image_directory :: str
-          A path to the root image directory.  This directory must have been
-          managed by the download-kanji-images.py tool.
-        source :: str
-          A stroke order diagram source.
+  @property
+  def 設定ファイルのディレクトリ(self):
+    return self.__設定ファイルのディレクトリ
 
-      This function returns a string representing a URL.  The URL will be the
-      contatenation of the string "/images/", the source (URL quoted,
-      UTF-8 encoding), a "/", and the string representation of the integral
-      value of 漢字 (UTF-8 encoding) if there is a local stroke order diagram
-      for the 漢字.  If no local stroke order diagram exists for the specified
-      漢字 from the specified source, then the returned URL will refer to a
-      remote stroke order diagram from the specified source.
-  """
-  assert len(漢字) == 1
-  assert ord(漢字) in KANJI_RANGE
-  assert source in RemoteSources
+  @property
+  def タイムアウト(self):
+    return self.__タイムアウト
 
-  パス = GetStrokeOrderDiagramPath(漢字, image_directory, source)
-  return (
-    RemoteSources[source][1](漢字)
-     if パス is False
-     else "/images/" + urllib.parse.quote(source) + "/" + str(ord(漢字))
-   )
+  @property
+  def ファイル(self):
+    return self.__ファイル
 
-def ServeStrokeOrderDiagram(漢字, image_directory, source):
-  """ Serve the locally-stored stroke order diagram for the specified 漢字.
-      This function expects these parameters:
+  @property
+  def EnabledSources(self):
+    return self.__enabled_sources
 
-        漢字 :: str
-          This is a string representation of the Unicode code point for the
-          漢字 whose stroke order diagram will be served.
-        image_directory :: str
-          A path to the root image directory.  This directory must have been
-          managed by the download-kanji-images.py tool.  This can be None.
-        source :: str
-          A stroke order diagram source.  This can be None.
-
-      This function must be invoked while handling a GET request.
-
-      If all of the parameters are valid, then this will serve the stroke
-      order diagram for the specified 漢字: The return value will be the
-      value returned by Bottle's static_file() function.  If either
-      'image_directory' or 'source' is None but 漢字 is valid, then this
-      function will return the empty string.  Otherwise, an HTTP error will
-      be generated.
-  """
-  try:
-    漢字 = chr(int(漢字))
-  except Exception as e:
-    abort(400, "invalid 漢字 encoding")
-  if len(漢字) != 1:
-    abort(400, "not a single-character 漢字")
-  if ord(漢字) not in KANJI_RANGE:
-    abort(400, "not 漢字")
-  data = ""
-  if image_directory is not None and source is not None:
-    local_path = GetStrokeOrderDiagramPath(漢字, image_directory, source)
-    if local_path is not False:
-      data = static_file(os.path.basename(local_path), os.path.dirname(local_path))
-  return data
-
-
-
-################################################################################
-# Utility functions for generating HTML5 code
-################################################################################
-
-def BeginHTML5(buf, title="Untitled", encoding="UTF-8"):
-  """ Produce a string containing the beginning of an HTML5 document.  This
-      will contain a doctype declaration, a meta charset entry for the specified
-      character encoding, and the specified document title.  It will end inside
-      of the HEAD tag."""
-  buf.write('<!DOCTYPE html><html><head><meta charset="' +
-    encoding + '" /><title>' + title + '</title>')
+  @property
+  def ImageDirectory(self):
+    return self.__image_directory
 
 
 
@@ -1416,8 +763,7 @@ class TLeitnerBucket(object):
         cards' due dates."""
     assert delay_in_secs >= 0
     self.__delay_in_secs = delay_in_secs
-    self.__num_cards = 0
-    self.__num_due_cards = 0
+    self.Reset()
     super().__init__()
 
   def AddStub(self, stub, date_touched, now):
@@ -1439,6 +785,11 @@ class TLeitnerBucket(object):
     if stub.IsDue(now):
       assert self.__num_due_cards > 0
       self.__num_due_cards -= 1
+
+  def Reset(self):
+    """ Reset the card counts."""
+    self.__num_cards = 0
+    self.__num_due_cards = 0
 
   @property
   def CardCount(self):
@@ -1539,10 +890,10 @@ class TCardDeckStatistics(object):
       self.__cards.add(card)
     self.__retry_map[card] = self.__retry_map.get(card, 0) + 1
 
-  def CardPassed(self, card, log_writer):
+  def CardPassed(self, card, write_to_log):
     """ Note that the user successfully answered the specified card.
         Additionally, the user's performance with the card will be recorded
-        via the specified log file writer.  A card's performance record has
+        via the specified function.  A card's performance record has
         the following fields (in order):
 
           1. the current timestamp as returned by time.time();
@@ -1552,14 +903,17 @@ class TCardDeckStatistics(object):
           3. the number of times the user had to retry the card before he
              successfully answered it.
 
-        If log_writer is None, then no performance data will be recorded."""
+        write_to_log should take a single tuple parameter containing these
+        fields.  (Ideally, write_to_log should not need to know how many
+        fields each record contains.)  If write_to_log is None, then no
+        performance data will be recorded."""
     self.__num_attempts += 1
     if card not in self.__retry_map:
       self.__num_passed_on_first_try += 1
     self.__cards.add(card)
     self.__num_left -= 1
-    if log_writer is not None:
-      log_writer.Write((time.time(), card.Hash, self.__retry_map.get(card, 0)))
+    if write_to_log is not None:
+      write_to_log((time.time(), card.Hash, self.__retry_map.get(card, 0)))
 
   @property
   def CardsSeen(self):
@@ -1646,16 +1000,17 @@ class TCardDeck(object):
     self.__current_card_marked = True
     self.Statistics.CardFailed(self.__current_card)
 
-  def MarkSucceeded(self, log_writer):
+  def MarkSucceeded(self, write_to_log):
     """ Mark the current card (that is, the card that was last drawn) as
         "succeeded" (that is, the user answered it correctly).  This method
         will remove the card from the deck.  Additionally, it will record
-        the user's performance with the card via the specified log
-        file writer."""
+        the user's performance with the card via the specified unary
+        function; see TCardDeckStatistics.CardPassed() for more information
+        about this parameter."""
     assert self.__current_card is not None
     assert not self.__current_card_marked
     self.__current_card_marked = True
-    self.Statistics.CardPassed(self.__current_card, log_writer)
+    self.Statistics.CardPassed(self.__current_card, write_to_log)
 
   @property
   def CurrentCard(self):
@@ -1694,45 +1049,40 @@ class TInvalidFlashcardStatsRecord(Exception):
     """the reason why this exception was generated (should be a string)"""
     return self.__reason
 
-def CreateFlashcardStubMap(handler_setter_function, parser_crank_function, buckets, now):
+def CreateFlashcardStubMap(flashcard_parser_cb, buckets, now):
   """ Parse flashcards and construct a dictionary mapping flashcard hashes to TFlashcardStubs.
       "Flashcards" are objects that have Hash() functions that return
       hexadecimal hash codes as strings.
 
       This method expects these parameters:
 
-        handler_setter_function :: (TFlashcard -> None) -> None
-          a function that takes its function parameter and makes it the function
-          that the flashcard parser invokes to process parsed flashcards
-        parser_crank_function :: None -> None
-          a nullary function that completely executes the parser
+        flashcard_parser_cb :: (TFlashcard -> None) -> None
+          This function constructs a flashcard file parser that will invoke
+          the specified callback for each flashcard it parses, then executes
+          the parser completely.
         buckets :: [TLeitnerBucket]
           a list of TLeitnerBuckets
         now :: numeric
-          a timestamp representing the present
-
-  """
+          a timestamp representing the present"""
   hashes_to_stubs = {}
   def Handleカード(カード):
     stub = TFlashcardStub(カード.Hash)
     hashes_to_stubs[stub.Hash] = stub
     buckets[0].AddStub(stub, TFlashcardStub._NEVER_TOUCHED, now)
-  handler_setter_function(Handleカード)
-  parser_crank_function()
+  flashcard_parser_cb(Handleカード)
   return hashes_to_stubs
 
-def ApplyStatsToStubMap(handler_setter_function, parser_crank_function, hashes_to_stubs, buckets, now):
+def ApplyStatsToStubMap(log_parser_cb, hashes_to_stubs, buckets, now):
   """ Parse flashcard performance log entries and adjust the TFlashcardStubs in the specified stub map accordingly.
       "Flashcards" are objects that have Hash() functions that return
       hexadecimal hash codes as strings.
 
       This method expects these parameters:
 
-        handler_setter_function :: (stats-log-record -> None) -> None
-          a function that takes its function parameter and makes it the function
-          that the stats log parser invokes to process parsed stats records
-        parser_crank_function :: None -> None
-          a nullary function that completely executes the parser
+        log_parser_cb :: (tuple -> None) -> None
+          This function constructs a performance log parser that will invoke
+          the specified callback for each log record (tuple) it parses, then
+          executes the parser completely.
         hashes_to_stubs :: dict<str,TFlashcardStub>
           a dictionary mapping flashcard hash hex strings to flashcard stubs;
           see CreateFlashcardStubMap()
@@ -1747,9 +1097,7 @@ def ApplyStatsToStubMap(handler_setter_function, parser_crank_function, hashes_t
       within 'buckets'.
 
       This function raises TInvalidFlashcardStatsRecord if it processes an
-      invalid flashcard stats record.
-
-  """
+      invalid flashcard stats record."""
   num_new_cards = len(hashes_to_stubs)
   max_leitner_bucket = len(buckets) - 1
   def HandleLogEntry(record):
@@ -1777,8 +1125,7 @@ def ApplyStatsToStubMap(handler_setter_function, parser_crank_function, hashes_t
       buckets[old_bucket].RemoveStub(stub, now)
       buckets[new_bucket].AddStub(stub, date_touched, now)
       stub.SetBucketIndex(new_bucket)
-  handler_setter_function(HandleLogEntry)
-  parser_crank_function()
+  log_parser_cb(HandleLogEntry)
   return (num_new_cards, sum(bucket.DueCardCount for bucket in buckets))
 
 class TCardDeckFactory(object):
@@ -1787,53 +1134,27 @@ class TCardDeckFactory(object):
       configuration file) after the pool of cards is decorated with performance
       data from a stats log file.
 
-      This class relies heavily on CreateFlashcardHashToLeitnerBucketMap() and
-      ApplyStatsLogToFlashcards()."""
+      This class relies heavily on CreateFlashcardStubMap() and
+      ApplyStatsToStubMap()."""
 
-  def __init__(self, flashcard_cf_file, new_cf_parser_cb, set_cf_handler_cb, stats_log_file, new_log_parser_cb, set_record_handler_cb, buckets):
-    """ Construct a new factory.  'flashcard_cf_file' is the path to the
-        flashcard file.  'new_cf_parser_cb' is a function (() -> Parser)
-        that constructs a new parser to parse flashcards in 'flashcard_cf_file'.
-        'set_cf_handler_cb' is a function ((Parser, (TFlashcard -> ())) -> ())
-        that sets the specified parser's flashcard handler to the specified
-        function.  'stats_log_file' is the path to the stats log file.
-        'new_log_parser_cb' and 'set_record_handler_cb' are similar to
-        'new_cf_parser_cb' and 'set_cf_handler_cb' except that they operate
-        on log parsers.  'buckets' is a list of TLeitnerBuckets."""
-    self.__flashcard_cf_file = flashcard_cf_file
-    self.__new_cf_parser_cb = new_cf_parser_cb
-    self.__set_cf_handler_cb = set_cf_handler_cb
-    self.__new_log_parser_cb = new_log_parser_cb
-    self.__leitner_buckets = buckets
+  def __init__(self, flashcard_parser_cb, log_parser_cb, buckets):
+    """ Construct a new factory.  This constructor expects three arguments:
+
+          flashcard_parser_cb :: (TFlashcard -> None) -> None
+            This function constructs a flashcard file parser that will invoke
+            the specified callback for each flashcard it parses, then executes
+            the parser completely.
+          log_parser_cb :: (tuple -> None) -> None
+            This function constructs a performance log parser that will invoke
+            the specified callback for each log record (tuple) it parses, then
+            executes the parser completely.
+          buckets :: [TLeitnerBuckets]
+            self-explanatory"""
+    self.__flashcard_parser_cb = flashcard_parser_cb
+    self.__log_parser_cb = log_parser_cb
+    self.__buckets = buckets
     self.__now = time.time()
-
-    # First, construct a map of flashcard hashes to flashcard stubs.
-    parser = new_cf_parser_cb()
-    def SetHandler(flashcard_handler):
-      set_cf_handler_cb(parser, flashcard_handler)
-    def ParserCrank():
-      with open(flashcard_cf_file, "r") as f:
-        parser.ParseStrings(f)
-      parser.Finish()
-    hashes_to_stubs = CreateFlashcardStubMap(SetHandler, ParserCrank, buckets, self.__now)
-    self.__card_count = len(hashes_to_stubs)
-
-    # Second, apply the stats file to the stubs.
-    # This will change the Leitner buckets.
-    parser = new_log_parser_cb()
-    def SetHandler(record_handler):
-      set_record_handler_cb(parser, record_handler)
-    def ParserCrank():
-      try:
-        with open(stats_log_file, "r") as f:
-          parser.ParseStrings(f)
-        parser.Finish()
-      except IOError as e:
-        if e.errno != errno.ENOENT:
-          raise e
-    self.__num_new_cards, self.__num_due_cards = ApplyStatsToStubMap(SetHandler, ParserCrank, hashes_to_stubs, buckets, self.__now)
-    assert self.__num_new_cards <= self.__num_due_cards # New cards are always due.
-    self.__hashes_to_stubs = hashes_to_stubs
+    self.Refresh()
     super().__init__()
 
   def ConstructDeck(self, size, num_new_cards):
@@ -1880,21 +1201,92 @@ class TCardDeckFactory(object):
 
     # Pass through the flashcard file and randomly pick cards according
     # to the parameters.
-    parser = self.__new_cf_parser_cb()
-    self.__set_cf_handler_cb(parser, OfferCard)
-    with open(self.__flashcard_cf_file, "r") as f:
-      parser.ParseStrings(f)
-    parser.Finish()
+    self.__flashcard_parser_cb(OfferCard)
 
     # Return the combined, shuffled results.
     combined_results = TRandomSelector(self.__card_count)
     combined_results.ConsumeSequence(YieldCards())
     return combined_results
 
+  def Refresh(self):
+    """ Parse the flashcards and their performance records again.  This
+        will reset the associated Leitner buckets."""
+    # First, reset the Leitner buckets' card counts and construct a map of
+    # flashcard hashes to flashcard stubs.
+    for bucket in self.__buckets:
+      bucket.Reset()
+    self.__hashes_to_stubs = CreateFlashcardStubMap(
+      self.__flashcard_parser_cb,
+      self.__buckets,
+      self.__now
+     )
+
+    # Second, apply the stats file to the stubs.
+    # This will change the Leitner buckets.
+    def LogParserCrank(log_record_handler):
+      try:
+        self.__log_parser_cb(log_record_handler)
+      except IOError as e:
+        if e.errno != errno.ENOENT:
+          raise e
+    self.__num_new_cards, self.__num_due_cards = ApplyStatsToStubMap(
+      self.__log_parser_cb,
+      self.__hashes_to_stubs,
+      self.__buckets,
+      self.__now
+     )
+    assert self.__num_new_cards <= self.__num_due_cards # New cards are always due.
+    self.__card_count = len(self.__hashes_to_stubs)
+
+  def RenderConfigPage(self,
+    title,
+    session_token,
+    post_handler_url,
+    image_settings=None
+   ):
+    """ Generate an HTML page that displays a deck configuration screen.
+        This method has the following parameters:
+
+          title :: str
+            the generated web page's title
+          session_token :: int | str
+            the current session's token
+          post_handler_url :: str
+            the absolute or relative URL of the script that will handle POST
+            results sent from the client
+          image_settings :: TStrokeOrderDiagramFSInfo
+            the stroke order diagram image manager for 漢字 stroke order
+            diagram sources or None if the user should not be allowed to
+            select a remote source for stroke order diagrams"""
+    fieldsets = []
+    template_contents = {
+      'title': title,
+      'session_token': session_token,
+      'handler_url': post_handler_url,
+      'num_cards_due': self.NumberOfDueCards,
+      'num_new_cards': self.NumberOfNewCards,
+      'num_cards_total': self.NumberOfCards,
+      'buckets': self.Buckets
+     }
+
+    if image_settings is not None:
+      assert isinstance(image_settings, TStrokeOrderDiagramFSInfo)
+      fieldsets.append({
+        'legend': "漢字 Stroke Order Diagram Source",
+        'contents': JinjaEnvironment.get_template('radiobuttonset.html').render({
+          'radio_set_name': "漢字source",
+          'prefix': "source",
+          'remote_sources': list(image_settings.EnabledSources)
+         })
+       })
+
+    template_contents['fieldsets'] = fieldsets
+    return JinjaEnvironment.get_template('deckconfig.html').render(template_contents)
+
   @property
   def Buckets(self):
     """a list of Leitner buckets"""
-    return list(self.__leitner_buckets)
+    return list(self.__buckets)
 
   @property
   def NumberOfCards(self):
@@ -1911,203 +1303,196 @@ class TCardDeckFactory(object):
     """the number of cards that have not been used in quizzes"""
     return self.__num_new_cards
 
-def GenerateCardHTML(handler_url, session_token, title, remaining_time_secs,
- head_creator, front_content_creator, back_content_creator, selectors_creator,
- stats_creator, bottom_creator):
-  """ Construct a string containing a complete HTML document for displaying a
-      flashcard.  The parameters are:
 
-        handler_url :: str
-          This is the URL that will handle form submissions.
-        session_token :: str
-          This is some value identifying the session.
-        title :: string
-          This is the HTML document's title.
-        remaining_time_secs :: int
-          This is the number of seconds left in the quiz or 0 if there is
-          no timeout.
-        head_creator :: (StringIO) => None
-          This is a unary function that writes HTML to the specified StringIO
-          buffer.  The HTML will show up in the generated page's <head> section.
-          This can be None.
-        front_content_creator :: (StringIO) => None
-          This is a unary function that writes HTML to the specified StringIO
-          buffer.  The HTML will show up in the <div> representing the front
-          of the card.
-        back_content_creator :: (StringIO) => None
-          This is a unary function that writes HTML to the specified StringIO
-          buffer.  The HTML will show up in the <div> representing the back
-          of the card.
-        selectors_creator :: (StringIO) => None
-          This is a unary function that writes HTML to the specified StringIO
-          buffer.  The HTML will appear after the back of the card but before
-          the answer buttons.  This can be None.
-        stats_creator :: (StringIO) => None
-          This is a unary function that writes HTML to the specified StringIO
-          buffer.  The HTML will appear in the <div> representing the
-          stats area.
-        bottom_creator :: (StringIO) => None
-          This is a unary function that writes HTML to the specified StringIO
-          buffer.  The HTML will appear after the card.  This can be None.
 
-      The produced document will send POSTs to handler in these situations:
+################################################################################
+# TFlashcard subclasses
+################################################################################
 
-        * The user selects the "やった！" button (answered the card correctly).
-          In this case, there will be two form values: "successful", which will
-          be "1", and "secs_left", which contains an integer representing the
-          number of seconds left in the quiz.  (This is meaningless if there
-          is no timeout.)  There is also a field named "method" whose value
-          will be "success".
+class TSourcedフラッシュカード(TFlashcard):
+  """ Instances of this class are Leitner flashcards with three parts: a front,
+      a back, and the card's source."""
 
-        * The user selects the "駄目だ" button (answered the card incorrectly).
-          In this case, there will be two form values as in the above case
-          except that the "successful" value will be "0".  There is also a
-          field named "method" whose value will be "failure".
+  class TFormatError(Exception):
+    """ ParseSourceFile() raises this exception whenever a flashcard row is formatted incorrectly."""
+    pass
 
-        * The quiz times out.  In this case, there will be one form value,
-          "timed_out", which will be "1".  There will also be a field named
-          "method" whose value will be "timeout".
+  @staticmethod
+  def ParseSourceFile(source_file, flashcard_cb):
+    """ Parse the specified configuration file describing sources and invoke the specified unary callback for each parsed flashcard."""
+    sources_and_paths = []
+    settings = ConstructConfigurationParser()
+    settings.read(source_file)
+    source_file_dir = os.path.dirname(source_file)
+    def ForEachSource(source_name, source_path):
+      with open(EnsureAbsolutePath(source_path, source_file_dir), 'r') as sf:
+        reader = ConstructLogParser(sf)
+        for row in reader:
+          if len(row) != 2:
+            raise TSourcedフラッシュカード.TFormatError("illegal number of fields: " + str(len(row)))
+          flashcard_cb(TSourcedフラッシュカード(row[0], row[1], source_name))
+    ForEachConfigurationSetting(settings, 'sources', ForEachSource)
 
-      All three POST scenarios will include a form value, "session_token",
-      containing the value of the 'session_token' parameter.
+  def Render(self,
+    title,
+    post_handler_url,
+    session_token,
+    前cb=lambda 前: 前,
+    後ろcb=lambda 後ろ: 後ろ,
+    source_cb=lambda source: source,
+    enable_ruby=True,
+    enable_kanji_highlighting=True,
+    enable_furigana_display=True,
+    image_settings=None,
+    image_source=None,
+    timeout_secs=0,
+    deck_stats=None
+   ):
+    """ Generate an HTML page that displays this flashcard.  This method has
+        the following parameters:
 
-"""
-  buf = io.StringIO()
-  BeginHTML5(buf, title=title)
-  buf.write("""<style type="text/css">
+          title :: str
+            the generated web page's title
+          post_handler_url :: str
+            the absolute or relative URL of the script that will handle POST
+            results sent from the client
+          session_token :: int | str
+            the current session's token
+          前cb :: str => str
+            a function that transforms the 前 content into the text that
+            will be rendered as the "front" of the flashcard
+          後ろcb :: str => str
+            a function that transforms the 後ろ content into the text that
+            will be rendered as the "back" of the flashcard
+          source_cb :: str => str
+            a function that transforms the Source content into the text that
+            will be rendered as the flashcard's source
+          enable_ruby :: boolean
+            True if 振り仮名 in the strings returned by 前cb, 後ろcb, and source_cb
+            should be parsed and placed inside <ruby> tags, False otherwise
+          enable_kanji_highlighting :: boolean
+            True if 漢字 in the strings returned by 前cb, 後ろcb, and source_cb
+            should be highlighted when the user moves his mouse over them,
+            False otherwise (True automatically sets enable_ruby)
+          enable_furigana_display :: boolean
+            True if the user should be given the option to enable and disable
+            振り仮名 in the strings returned by 前cb, 後ろcb, and source_cb,
+            False otherwise (True automatically sets enable_ruby)
+          image_settings :: TStrokeOrderDiagramFSInfo
+            the stroke order diagram image manager for 漢字 stroke order
+            diagrams or None if 漢字 stroke order diagrams shouldn't be displayed
+            (non-None values automatically set enable_ruby if image_source is
+            also non-None)
+          image_source :: str
+            an enabled remote source for 漢字 stroke order diagrams or None
+            if 漢字 stroke order diagrams shouldn't be displayed (non-None
+            values automatically set enable_ruby if image_settings is
+            also non-None)
+          timeout_secs :: int
+            the number of seconds remaining in the quiz; zero or negative if
+            there is no timeout
+          deck_stats :: TCardDeckStatistics
+            the current card deck's statistics or None if statistics shouldn't
+            be displayed"""
+    前 = 前cb(self.前)
+    後ろ = 後ろcb(self.後ろ)
+    source = source_cb(self.Source)
+    kanji_sods_enabled = image_settings is not None and image_source in image_settings.EnabledSources
+    bottom_content = ""
+    selectors = []
+    css = []
+    js = []
 
-body {
-  margin: 0px;
-  padding: 0px;
-  width: 100%;
-  height: 100%;
-}
+    template_contents = {
+      'title': title,
+      'handler_url': post_handler_url,
+      'session_token': session_token,
+      'rts': timeout_secs,
+      'show_stats': deck_stats is not None
+     }
 
-div.toplevel {
-  position: absolute;
-  margin: auto;
-  top: 0px;
-  bottom: 0px;
-  left: 0px;
-  right: 0px;
-  text-align: center;
-  background: #c0c0c0;
-  padding: 10px 15px;
-}
+    if deck_stats is not None:
+      assert isinstance(deck_stats, TCardDeckStatistics)
+      template_contents.update({
+        'num_cards_passed': deck_stats.NumPassedOnFirstTry,
+        'num_cards_failed': deck_stats.NumFailedOnFirstTry,
+        'num_cards_seen': deck_stats.NumAttempts,
+        'num_cards_left': deck_stats.NumCardsLeft,
+        'num_cards_total': deck_stats.NumCards
+       })
 
-div.card {
-  display: inline-block;
-  vertical-align: middle;
-  padding: 10px 15px;
-  border: #a0a0a0 solid 1px;
-  background: #f5f5f5;
-}
+    if kanji_sods_enabled:
+      enable_ruby = True
+      漢字 = set(字 for 字 in 前 + 後ろ + source if ord(字) in KANJI_RANGE)
+      bottom_content = "".join(
+        '<img name="漢字diagram' + 字 + '" style="display: none" alt="漢字 Diagram" src="' +
+         image_settings.GetStrokeOrderDiagramURL(字, image_source) + '" />' for 字 in 漢字
+       )
+      js.append("/static/kanjisod.js")
+      selectors.append('<input type="button" name="show_kanji" value="漢字の書き方を見せて" onclick="enableKanjiView()"/>')
 
-div.card div.stats {
-  display: inline-block;
-  font-size: medium;
-  text-align: center;
-  margin: 0.5em 0.5em;
-}
+    if enable_furigana_display:
+      enable_ruby = True
+      js.append("/static/furigana.js")
+      selectors.append("""<input type="button" name="振り仮名を見せて" value="振り仮名を見せて" onclick="toggle_visibility('furigana')"/>""")
 
-div.front {
-  font-size: xx-large;
-  text-align: center;
-  border: black solid 1px;
-  padding: 0.5em 0.5em;
-  margin: 1em 1em;
-}
+    if enable_kanji_highlighting:
+      enable_ruby = True
 
-div.back {
-  display: inline;
-  font-size: large;
-  text-align: center;
-}
+    if enable_ruby:
+      def GenerateDictionaryJS(字):
+        quoted = urllib.parse.quote(字)
+        return """window.open('http://jisho.org/kanji/details/""" + quoted + """', '""" + quoted + """')"""
+      def GenerateRuby(言葉と振り仮名):
+        buf = io.StringIO()
+        GenerateHTML5Ruby(言葉と振り仮名, buf,
+         "kanji" if enable_kanji_highlighting else "nhlkanji",
+         GenerateDictionaryJS,
+         (lambda 字: "showKanjiImage('" + 字 + "')") if kanji_sods_enabled else None,
+         (lambda 字: "hideKanjiImage('" + 字 + "')") if kanji_sods_enabled else None,
+         "furigana", False)
+        return buf.getvalue()
+      producer = T言葉と振り仮名Producer()
+      前 = GenerateRuby(producer.ProcessAndReset(前))
+      後ろ = GenerateRuby(producer.ProcessAndReset(後ろ))
+      source = GenerateRuby(producer.ProcessAndReset(source))
 
-div.selectors {
-  font-size: medium;
-  text-align: center;
-  margin: 1em 2em;
-  padding: 0.5em 0.5em;
-}
-</style>""")
-  if head_creator is not None:
-    head_creator(buf)
-  if remaining_time_secs > 0:
-    buf.write("""<script type="text/javascript">var secs_left = """)
-    buf.write(str(remaining_time_secs))
-    buf.write("""; var t = setTimeout("UpdateSecondsDisplay();", 1000);
-        function UpdateSecondsDisplay() {{
-          secs_left = secs_left - 1
-          if (secs_left <= 0) {{
-            document.forms["timeout"].submit()
-          }}
-          var secs_left_fields = document.getElementsByTagName("input");
-          var i = 0;
-          for (i = 0; i < secs_left_fields.length; i++) {{
-            var elem = secs_left_fields.item(i);
-            if (elem.getAttribute("name") == "secs_left") {{
-              elem.setAttribute("value", secs_left.toString());
-            }}
-          }}
-          var timefield = document.getElementById("time_left");
-          while (timefield.childNodes.length >= 1) {{
-            timefield.removeChild(timefield.firstChild);
-          }}
-          timefield.appendChild(timefield.ownerDocument.createTextNode(
-            Math.floor(secs_left / 3600).toString() + "時" + Math.floor((secs_left % 3600) / 60).toString() + "分" + ((secs_left % 3600) % 60).toString() + "秒"
-           ));
-          t = setTimeout("UpdateSecondsDisplay();", 1000);
-        }}</script>""")
-  buf.write("""<body><div class="toplevel"><div class="card"><div class="front">""")
-  front_content_creator(buf)
-  buf.write('</div><div id="hidden_portion" style="visibility:hidden;"><div class="back">')
-  back_content_creator(buf)
-  buf.write('</div><div class="selectors">')
-  if selectors_creator is not None:
-    selectors_creator(buf)
-  buf.write("""<form accept-charset="UTF-8" style="display:inline" action=\"""")
-  buf.write(handler_url)
-  buf.write("""\" method="post">
-      <input type="submit" value="駄目だ" />
-      <input type="hidden" name="method" value="failure" />
-      <input type="hidden" name="session_token" value=\"""")
-  buf.write(str(session_token))
-  buf.write("""\" />
-      <input type="hidden" name="successful" value="0" />
-      <input type="hidden" name="secs_left" value=\"""")
-  rts_string = str(remaining_time_secs)
-  buf.write(rts_string)
-  buf.write("""\" /></form><form accept-charset="UTF-8" style="display:inline" action=\"""")
-  buf.write(handler_url)
-  buf.write("""\" method="post">
-      <input type="submit" value="やった！" />
-      <input type="hidden" name="method" value="success" />
-      <input type="hidden" name="session_token" value=\"""")
-  buf.write(str(session_token))
-  buf.write("""\" />
-      <input type="hidden" name="successful" value="1" />
-      <input type="hidden" name="secs_left" value=\"""")
-  buf.write(rts_string)
-  buf.write("""\" /></form></div></div><div class="stats">""")
-  stats_creator(buf)
-  buf.write("""</div></div>""")
-  if bottom_creator is not None:
-    bottom_creator(buf)
-  buf.write("""<form id="show_form" style="visibility:visible;">
-      <input type="button" value="Show Answer"
-        onclick="document.getElementById('show_form').setAttribute('style', 'visibility:hidden'); document.getElementById('hidden_portion').setAttribute('style', 'visibility:visible');" />
-    </form></div>
-    <form accept-charset="UTF-8" action=\"""")
-  buf.write(handler_url)
-  buf.write("""\" method="post" id="timeout" style="visibility:hidden;">
-    <input type="hidden" name="method" value="timeout" />
-    <input type="hidden" name="session_token" value=\"""")
-  buf.write(str(session_token))
-  buf.write("""\" />
-    <input type="hidden" name="timed_out" value="1" /></form></body></html>""")
+    template_contents['front_content'] = 前
+    template_contents['back_content'] = 後ろ
+    template_contents['source_content'] = source
+    template_contents['bottom_content'] = bottom_content
+    template_contents['css'] = css
+    template_contents['js'] = js
+    if selectors:
+      selectors = ["<form>"] + selectors + ["</form>"]
+    template_contents['selectors_content'] = ''.join(selectors)
+    return JinjaEnvironment.get_template('sourcedflashcard.html').render(template_contents)
 
-  return buf.getvalue()
+  def __init__(self, 前, 後ろ, source):
+    """ Construct a new flashcard."""
+    self.__前 = 前
+    self.__後ろ = 後ろ
+    self.__source = source
+    super().__init__()
+
+  def __bytes__(self):
+    return bytes(self.前, encoding="UTF-8") + bytes(self.後ろ, encoding="UTF-8") + bytes(self.Source, encoding="UTF-8")
+
+  @property
+  def 後ろ(self):
+    """the back"""
+    return self.__後ろ
+
+  @property
+  def 前(self):
+    """the front"""
+    return self.__前
+
+  @property
+  def Source(self):
+    """the card's source"""
+    return self.__source
+
 
 
 
@@ -2115,25 +1500,19 @@ div.selectors {
 # Common tool functions
 ################################################################################
 
-def ツールの設定ファイルを分析する(パス名, ルートの名前, settings_okay, ハンドラ):
+def ツールの設定ファイルを分析する(パス名, ハンドラ):
   """ Parse the configuration file whose path is パス名.  This function expects
       the following parameters:
 
         パス名 :: str
         This is a path to a configuration file.
-      ルートの名前 :: str
-        This specifies the expected root name.
-      settings_okay :: bool
-        If this is True, then the root may contain settings; otherwise, this
-        method will print an error message and terminate the program if the
-        configuration file's root contains any settings.
-      ハンドラ :: (section | setting, str, (str, int) => None) => None
+      ハンドラ :: (configparser.ConfigParser, str, (str, int) => None) => None
         This specifies the handler that will process the configuration file's
-        root's settings and sections.  The handler's second parameter is
-        the resolved absolute path equivalent to パス名.  The handler's third
-        parameter is an error function: It prints its first argument as an error
-        message and terminates the program with the specified numeric error
-        code, which defaults to 2.
+        settings as stored in the specified parser object.  The handler's second
+        parameter is the resolved absolute path equivalent to パス名.  The
+        handler's third parameter is an error function: It prints its first
+        argument as an error message and terminates the program with the
+        specified numeric error code, which defaults to 2.
 
       This function will handle several common errors related to configuration
       file parsing, such as パス名 pointing to something that is not a file.
@@ -2148,33 +1527,27 @@ def ツールの設定ファイルを分析する(パス名, ルートの名前,
     sys.exit(2)
 
   # Parse the configuration file.
-  parser = TConfigurationDOMParser()
+  parser = ConstructConfigurationParser()
   try:
-    with open(パス名, "r") as f:
-      parser.ParseStrings(f)
-    parser.Finish()
-  except TConfigurationFormatError as e:
+    parser.read(パス名)
+  except configparser.Error as e:
     sys.stderr.write("すみません、その設定ファイルは駄目です。\n")
     sys.stderr.write(str(e) + "\n")
     sys.exit(2)
   except Exception as e:
-    sys.stderr.write("unexpected error while parsing the configuration file: " + str(e) + "\n")
+    sys.stderr.write("unexpected error while parsing the configuration file " + パス名 + ": " + str(e) + "\n")
     sys.exit(2)
-  パス名 = os.path.abspath(os.path.dirname(パス名))
+  パス名 = os.path.abspath(パス名)
 
-  # Extract sections and settings from the configuration file.
-  # Check for errors.
+  # Process the configuration file's settings.
   def PrintErrorAndExit(message, error_code=2):
     sys.stderr.write("すみません、その設定ファイルは駄目です。" + message + "\n")
     sys.exit(error_code)
-  if parser.Root.Name != ルートの名前:
-    PrintErrorAndExit("The root's name should be '" + ルートの名前 + "'.")
-  if parser.Root.HasSettings and not settings_okay:
-    PrintErrorAndExit("The root node cannot have settings.")
+  ハンドラ(parser, パス名, PrintErrorAndExit)
 
-  # Process the configuration file's root's settings and sections.
-  for child in parser.Root.Children:
-    ハンドラ(child, パス名, PrintErrorAndExit)
+@get("/static/<filename>")
+def ServeStaticContent(filename):
+  return static_file(filename, TemplateDirectory)
 
 
 

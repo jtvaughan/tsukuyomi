@@ -126,9 +126,37 @@ Configuration Files
 -------------------
 
 言葉 Flashcards expects the user to provide a special configuration file
-describing the server's properties.  The configuration file's root
-must be named "kotoba-quiz-settings" and may contain the following
-attributes:
+describing the server's properties.  The configuration file should contain
+two sections:
+
+1. _general_: This section contains general settings.
+2. _delays_ (optional): This section contains the delays (in days) associated
+   with each [Leitner bucket](http://en.wikipedia.org/wiki/Leitner_system).
+   
+   Each setting is a natural number representing the number of days after
+   which cards placed into the corresponding Leitner bucket will be due for
+   review.  The total number of Leitner buckets is the number of settings in
+   this section plus one.  (Bucket zero is always defined.  Its delay
+   is zero, which means that cards that the user fails to answer will
+   be immediately due for review.)
+   
+   Although you can use any natural numbers you want as delays, it makes
+   sense to increase the delay as cards move into higher-numbered
+   Leitner buckets.  The following example might be a useful configuration:
+
+>     [delays]
+>     1
+>     3
+>     14
+>     30
+>     90
+>     180
+
+   In this example, the Leitner buckets' delays in increasing order by
+   Leitner bucket number are 0, 1, 3, 14, 30, 90, and 180 days.  There
+   are seven buckets in this example.
+
+The _general_ section's settings are:
 
 1. _flashcards-file_ (required): This attribute specifies the
    path to a configuration file containing 言葉 flashcards.
@@ -136,41 +164,12 @@ attributes:
 2. _stats-log_ (optional): This attribute specifies the path to the log file to
    which the server will append performance data.  (See the Stats Log Files
    section for more information.)
-3. _delays_ (optional): This section contains the delays (in days) associated
-   with each [Leitner bucket](http://en.wikipedia.org/wiki/Leitner_system).
-   
-   This section should only contain settings.  Each setting is a natural
-   number representing the number of days after which cards placed
-   into the corresponding Leitner bucket will be due for review.
-   The total number of Leitner buckets is the number of settings in
-   this section plus one.  (Bucket zero is always defined.  Its delay
-   is zero, which means that cards that the user fails to answer will
-   be immediately due for review.)
-
-   Although you can use any natural numbers you want as delays, it makes
-   sense to increase the delay as cards move into higher-numbered
-   Leitner buckets.  The following example might be a useful configuration:
-
->     "kotoba-leitner-buckets" {
->         "1";
->         "3";
->         "14";
->         "30";
->         "90";
->         "180"
->     }
-
-   In this example, the Leitner buckets' delays in increasing order by
-   Leitner bucket number are 0, 1, 3, 14, 30, 90, and 180 days.  There
-   are seven buckets in this example.
-
-4. _port_ (optional): This attribute specifies the server's port number.
+3. _port_ (optional): This attribute specifies the server's port number.
    Port numbers must be integers between 1 and 65535, inclusive.  If this
    attribute is absent, then the user will have to specify the port
    via the command-line `ポート番号` option.  (See the Running section
    above for more information.)
-
-5. _image-settings_ (optional): This attribute specifies a path to
+4. _image-settings_ (optional): This attribute specifies a path to
    a 漢字 Stroke Order Diagram Downloader configuration file.  (See the
    README file for the 漢字 Stroke Order Diagram Downloader for more
    information.)  If this attribute is present, 言葉 Flashcards will
@@ -183,12 +182,14 @@ the directory containing the configuration file.
 
 Here is a sample configuration file:
 
->     "kotoba-quiz-settings" {
-        "flashcards-file" { "/日記/日本/日本語/言葉のフラッシュカード.txt" }
-        "delays" { "4"; "16" }
-        "image-settings" { "./漢字の設定ファイル" }
-        "port" { "1337" }
-    }
+>     [general]
+>     flashcards-file: 日本語/言葉のフラッシュカード.txt
+>     port: 1337
+>     image-settings: image-downloader-settings.txt
+>     
+>     [delays]
+>     4
+>     16
 
 
 
@@ -197,52 +198,44 @@ Flashcard Files
 
 _言葉 flashcards_ are simple two-sided flashcards containing:
 
-1. 日本語：a word, phrase, sentence, or passage written in Japanese;
-2. 英語：the English translation of the 日本語 part (possibly with
-   additional notes or translation aids); and
+1. 前：the front of the card;
+2. 後ろ：the back of the card; and
 3. `Source`：the source of the flashcard (e.g., a friend, 先生, or yourself)
 
-There is nothing stopping you from using these flashcards as regular
-two-sided flashcards: You can put anything you want into the two
-sides.  However, the algorithms and UI associated with these flashcards
-are written to interpret the sides as described above.  (NOTE: 英語 does
-not have to be written in English.)
+You can put anything you want into the two sides.  However, the algorithms and
+UI associated with these flashcards treat Japanese text specially.
 
-言葉 flashcards are stored within configuration files.  Each file must
-follow these rules:
+言葉 flashcards are split across several files in a flat tree.  The root of the
+tree is a configuration file containing the flashcard's sources and the files
+containing the cards' front and back contents.  This _source file_ must contain
+a section named "sources" containing one setting per source.  Each setting's
+name is the name of the source and its value is the path to the file
+containing the front and back contents for the flashcards from that source.
 
-1. The root must be named "言葉のフラッシュカード".
-2. The root must contain zero or more sections called _source sections_.
-3. Each source section must contain zero or more attributes called
-   _flashcard sections_.
-4. Neither source sections nor the root may contain settings.
-5. Flashcard sections may not have empty values.  (But flashcard sections'
-   values may be empty strings.)
+Here is a sample source file:
 
-Each 言葉 flashcard is constructed as follows:
+>     [sources]
+>     サマー・ウォーズ: サマー・ウォーズ.txt
+>     パプリカ: パプリカ.txt
+>     西[にし]田[だ]先[せん]生[せい]: 西田先生.txt
+>     なつこさん: なつこさん.txt
+>     さいとうさん: さいとうさん.txt
+>     テニスの王[おう]子[じ]様[さま]: テニスの王子様.txt
 
-1. The `Source` side is the name of the source section containing
-   the flashcard.
-2. The 日本語 side is the name of the flashcard section corresponding to
-   the 言葉 flashcard.
-3. The 英語 side is the value of the flashcard section corresponding to
-   the 言葉 flashcard.
+Each file specified by a source file is a log file ("unix"-flavored CSV file)
+in which each row specifies a flashcard.  The first field of each row contains
+the associated card's front matter (前), whereas the second field contains the
+card's back matter (後ろ).
 
-For example, the 言葉 flashcard file
+Here is a sample flashcard file:
 
->     "言葉のフラッシュカード" {
-        "Japanese class" {
-          "私はジョーダンヴァンです。よろしくお願いします。" { "I am Joodan Van.  Nice to meet you. (丁寧語)" }
-        "オーストラリア人です。" { "[The subject is] Australian." }
-        }
-        "もとひろさん" {
-          "お手洗いはどこですか。" { "Where is the bathroom? (polite)" }
-        }
-    }
+>     "私[わたし]はジョーダンヴァンです。よろしくお願[ねが]いします。","I am Joodan Van.  Nice to meet you. (丁寧語)"
+>     "オーストラリア人です。","[The subject is] Australian."
+>     "お手洗いはどこですか。","Where is the bathroom? (polite)"
 
 defines three 言葉 flashcards:
 
-1. 日本語：私はジョーダンヴァンです。よろしくお願いします。  
+1. 私[わたし]はジョーダンヴァンです。よろしくお願[ねが]いします。  
    英語：I am Joodan Van.  Nice to meet you. (丁寧語)  
    Source：Japanese class
 
@@ -256,21 +249,21 @@ defines three 言葉 flashcards:
 
 言葉 Flashcards provides an easy way to annotate Japanese text within 言葉
 flashcards.  If a set of [kanji](http://en.wikipedia.org/wiki/Kanji) characters
-is followed by a matching pair of parentheses, then the text within the
-parentheses will be rendered as the kanji characters'
+is followed by a matching pair of square brackets('[' and ']'), then the text
+within the square brackets will be rendered as the kanji characters'
 [振り仮名 (furigana)](http://en.wikipedia.org/wiki/Furigana).  For example:
 
-> ## 今日(きょう)レストランに行って、友(とも)達(だち)と食(しょく)事(じ)をして、たくさんお酒を飲みました。(Note that this text isn't furigana even though it's inside matching parentheses.)今晩家へ(This isn't furigana, either.)帰(かえ)ります。酒(酒(さけ))
+> ## 今日[きょう]レストランに行って、友[とも]達[だち]と食[しょく]事[じ]をして、たくさんお酒を飲みました。[Note that this text isn't furigana even though it's inside matching square brackets.]今晩家へ[This isn't furigana, either.]帰[かえ]ります。酒[酒[さけ]]
 
 produces this 振り仮名-annotated text:
 
-> ## <ruby>今日<rt>きょう</rt></ruby>レストランに行って、<ruby>友<rt>とも</rt></ruby><ruby>達<rt>だち</rt></ruby>と<ruby>食<rt>しょく</rt></ruby><ruby>事<rt>じ</rt></ruby>をして、たくさんお酒を飲みました。(Note that this text isn't furigana even though it's inside matching parentheses.)今晩家へ(This isn't furigana, either.)<ruby>帰<rt>かえ</rt></ruby>ります。<ruby>酒<rt>酒(さけ)</rt></ruby>
+> ## <ruby>今日<rt>きょう</rt></ruby>レストランに行って、<ruby>友<rt>とも</rt></ruby><ruby>達<rt>だち</rt></ruby>と<ruby>食<rt>しょく</rt></ruby><ruby>事<rt>じ</rt></ruby>をして、たくさんお酒を飲みました。[Note that this text isn't furigana even though it's inside matching square brackets.]今晩家へ[This isn't furigana, either.]<ruby>帰<rt>かえ</rt></ruby>ります。<ruby>酒<rt>酒[さけ]</rt></ruby>
 
 Notice:
 
-1. Matching parentheses only denote 振り仮名 when they follow one or more
-   consecutive kanji characters.  Matching parentheses appearing anywhere else
-   are treated as part of the regular flow of text.
+1. Matching square brackets only denote 振り仮名 when they follow one or more
+   consecutive kanji characters.  Matching square brackets appearing anywhere
+   else are treated as part of the regular flow of text.
 2. 振り仮名 annotations do not work within 振り仮名 annotations.
 
 

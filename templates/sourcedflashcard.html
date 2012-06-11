@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+
+{#
+  This page renders a sourced flashcard in HTML5.  It requires the
+  following template parameters:
+
+    css :: [str]
+      a list of URL paths to CSS files to include
+    js :: [str]
+      a list of URL paths to JS files to include
+    rts :: int
+      the amount of time left in seconds; zero or negative if there is no
+      page timeout
+    front_content :: str
+      the front of the card
+    back_content :: str
+      the back of the card
+    source_content :: str
+      the source of the flashcard
+    selectors_content :: str
+      HTML to be rendered in the "selectors" section (usually buttons)
+    bottom_content :: str
+      HTML to be rendered beneath the card but above the "Show Answer" button
+    handler_url :: str
+      the URL of the script that will handle POST requests from the rendered
+      page's forms
+    session_token :: str | int
+      the current session's token
+    show_stats :: boolean
+      True if deck statistics should be displayed, False otherwise
+    num_cards_passed :: int
+      the number of cards that the user successfully answered on the first try
+    num_cards_failed :: int
+      the number of cards that the user failed to answer correctly on the
+      first try
+    num_cards_seen :: int
+      the number of cards that the user has seen
+    num_cards_left :: int
+      the number of cards that haven't been successfully answered yet
+    num_cards_total :: int
+      the number of cards in the deck #}
+
+{% block css %}
+  <link rel="stylesheet" type="text/css" href="/static/sourceflashcard.css" />
+  {% for css_path in css %}
+    <link rel="stylesheet" type="text/css" href="{{ css_path }}" />
+  {% endfor %}
+{% endblock %}
+
+{% block js %}
+  {% if rts > 0 %}
+    <script type="text/javascript" src="/static/timeout.js"></script>
+  {% endif %}
+  {% for js_path in js %}
+    <script type="text/javascript" src="{{ js_path }}"></script>
+  {% endfor %}
+{% endblock %}
+
+{% block body %}
+  <div class="toplevel">
+    <div class="card">
+      <div class="front">
+        {{ front_content }}
+      </div>
+      <div id="hidden_portion" style="visibility:hidden;">
+        <div class="back">
+          {{ back_content }}
+        </div>
+        <div class="source">
+          (Source: {{ source_content }})
+        </div>
+        <div class="selectors">
+          {{ selectors_content }} <!-- XXX Special buttons (furigana, kanji display) -->
+          <form accept-charset="UTF-8" style="display:inline" action="{{ handler_url }}" method="post">
+            <input type="submit" value="駄目だ" />
+            <input type="hidden" name="method" value="failure" />
+            <input type="hidden" name="session_token" value="{{ session_token }}" />
+            <input type="hidden" name="successful" value="0" />
+            <input type="hidden" name="secs_left" value="{{ rts }}" />
+          </form>
+          <form accept-charset="UTF-8" style="display:inline" action="{{ handler_url }}" method="post">
+            <input type="submit" value="やった！" />
+            <input type="hidden" name="method" value="success" />
+            <input type="hidden" name="session_token" value="{{ session_token }}" />
+            <input type="hidden" name="successful" value="1" />
+            <input type="hidden" name="secs_left" value="{{ rts }}" />
+          </form>
+        </div>
+      </div>
+      <div class="stats">
+        {% if show_stats %}
+          <span class="passed">{{ num_cards_passed }} passed</span>,
+          <span class="failed">{{ num_cards_failed }} failed</span>,
+          <span class="seen">{{ num_cards_seen }} seen</span>,
+          {{ num_cards_left }} of {{ num_cards_total }} left.
+        {% endif %}
+        {% if rts > 0 %}
+          <span id="time_left">{{ rts // 3600 }}時{{ (rts % 3600) // 60 }}分{{ (rts % 3600) % 60 }}秒</span>
+        {% endif %}
+      </div>
+    </div>
+    {{ bottom_content }}
+    <form id="show_form" style="visibility:visible;">
+      <input
+       type="button"
+       value="Show Answer"
+       onclick="document.getElementById('show_form').setAttribute('style', 'visibility:hidden'); document.getElementById('hidden_portion').setAttribute('style', 'visibility:visible');" />
+    </form>
+  </div>
+  <form accept-charset="UTF-8" action="{{ handler_url }}" method="post" id="timeout" style="visibility:hidden;">
+    <input type="hidden" name="method" value="timeout" />
+    <input type="hidden" name="session_token" value="{{ session_token }}" />
+    <input type="hidden" name="timed_out" value="1" />
+    <input type="hidden" name="rts" value="{{ rts }}" />
+  </form>
+{% endblock %}
+

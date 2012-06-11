@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+
+<!--
+  Render a deck configuration page.  This template takes these parameters:
+
+    session_token :: int | str
+      the current session's token
+    title :: str
+      the generated web page's title
+    handler_url :: str
+      the URL of the script that will handle POST requests from the rendered
+      page's forms
+    num_cards_due :: int
+      the number of cards in the deck that are due
+    num_new_cards :: int
+      the number of cards in the deck that are new (i.e., the number of cards
+      that the user hasn't seen)
+    num_cards_total :: int
+      the total number of cards in the deck
+    buckets :: [TLeitnerBucket]
+      the array of Leitner buckets
+    fieldsets :: set<dict>
+      a set of additional field sets for the configuration form in which each
+      element contains two key-value pairs:
+        legend :: str
+          the field set's title
+        contents :: str
+          the HTML to be rendered within the field set -->
+
+{% block body %}
+  <p>
+    <h1>{{ title }}</h1>
+  </p>
+  <p>
+    {{ num_cards_due }} of {{ num_cards_total }} cards are due.  ({{ num_new_cards }} are new.)
+  </p>
+  <p>
+    <table border="1">
+      <caption>Leitner Bucket Distribution</caption>
+      <tr>
+        <th style="text-align: left">Bucket Number</th>
+        {% for bucket in buckets %}
+          <td style="text-align: center">{{ loop.index0 }}</td>
+        {% endfor %}
+      </tr>
+      <tr>
+        <th style="text-align: left">Cards Due / Card Count</th>
+        {% for bucket in buckets %}
+          <td style="text-align: center">
+            {% if bucket.CardCount %}
+              {% if bucket.DueCardCount %}{{ bucket.DueCardCount }}/{% endif %}{{ bucket.CardCount }}
+            {% endif %}
+          </td>
+        {% endfor %}
+      </tr>
+    </table>
+  </p>
+  <p>
+    <form method="post" action="{{ handler_url }}">
+      <fieldset>
+        <legend>Limits</legend>
+        <p>
+          <table>
+            <tr>
+              <th style="text-align:right"><label>Time:</label></th>
+              <td><input type="text" id="時" name="hours" pattern="[0-9]*" /></td>
+              <td><label for="時">時</label></td>
+            </tr>
+            <tr>
+              <td></td>
+              <td><input type="text" id="分" name="minutes" pattern="[0-9]*" /></td>
+              <td><label for="分">分</label></td>
+            </tr>
+            <tr>
+              <td></td>
+              <td><input type="text" id="秒" name="seconds" pattern="[0-9]*" /></td>
+              <td><label for="秒">秒</label></td>
+            </tr>
+          </table>
+        </p>
+        <p>
+          <table>
+            <tr>
+              <th style="text-align:right"><label>Max deck size:</label></th>
+              <td><input type="text" name="size" pattern="[0-9]*" title="the maximum number of due cards to show or the maximum deck size if no cards are due"/></td>
+            </tr>
+            <tr>
+              <th style="text-align:right"><label>Max new cards:</label></th>
+              <td><input type="text" name="num_new_cards" pattern="[0-9]*" title="the maximum number of new cards to show" /></td>
+            </tr>
+          </table>
+        </p>
+      </fieldset>
+      {% for fieldset in fieldsets %}
+        <fieldset>
+          <legend>{{ fieldset.legend }}</legend>
+          <p>
+            {{ fieldset.contents }}
+          </p>
+        </fieldset>
+      {% endfor %}
+      <input type="submit" value="始めましょう！" autofocus="autofocus" />
+      <input type="hidden" name="method" value="configure" />
+      <input type="hidden" name="session_token" value="{{ session_token }}" />
+    </form>
+  </p>
+{% endblock %}
+
