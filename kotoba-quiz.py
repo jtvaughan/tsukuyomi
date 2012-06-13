@@ -40,6 +40,7 @@ QuizURL = "/"
 CurrentDeck = None
 CurrentSession = None
 DeckFactory = None
+DeckName = "Untitled"
 FlashcardsFile = None
 FlashcardsStatsLog = None
 ImageSettings = None
@@ -62,7 +63,7 @@ def Config():
   global CurrentSession
   CurrentSession = str(random.random())
   DeckFactory.Refresh()
-  return DeckFactory.RenderConfigPage("言葉の試験 Setup", CurrentSession, QuizURL,
+  return DeckFactory.RenderConfigPage(DeckName + " -- Setup", CurrentSession, QuizURL,
    image_settings=ImageSettings)
 
 @post(QuizURL)
@@ -138,18 +139,17 @@ def HandlePost():
   else:
     abort(400, "bad method choice")
 
-def Main():
-  global DeckFactory
-  global FlashcardsFile
-  global FlashcardsStatsLog
-  global ImageSettings
-
-
-
 def RenderCard():
-  return CurrentDeck.GetCard().Render("言葉の試験", QuizURL, CurrentSession,
-   image_settings=ImageSettings, image_source=ImageSource,
-   timeout_secs=RemainingTimeSecs, deck_stats=CurrentDeck.Statistics)
+  stats = CurrentDeck.Statistics
+  return CurrentDeck.GetCard().Render(
+    DeckName + " -- " + str(int((stats.NumCards - stats.NumCardsLeft) / stats.NumCards * 100)) + "% Done",
+    QuizURL,
+    CurrentSession,
+    image_settings=ImageSettings,
+    image_source=ImageSource,
+    timeout_secs=RemainingTimeSecs,
+    deck_stats=stats
+   )
 
 def RenderFinishPage(timed_out):
   assert CurrentDeck is not None
@@ -193,6 +193,7 @@ delays = [0]  # Bucket zero is implicitly defined.
 # Parse the configuration file.
 def ハンドラ(config, パス名, PrintErrorAndExit):
   global ポート
+  global DeckName
   global FlashcardsFile
   global FlashcardsStatsLog
   global ImageSettings
@@ -210,6 +211,10 @@ def ハンドラ(config, パス名, PrintErrorAndExit):
         FlashcardsStatsLog = EnsureAccessibleAbsoluteFilePath(stats_log, 設定ファイルのディレクトリ, os.R_OK | os.W_OK, 'stats-log')
     if 'image-settings' in general:
       ImageSettings = TStrokeOrderDiagramFSInfo(general['image-settings'])
+    if 'name' in general:
+      DeckName = general['name'].strip()
+      if not DeckName:
+        DeckName = "Untitled"
     if 'port' in general:
       port = general['port']
       try:

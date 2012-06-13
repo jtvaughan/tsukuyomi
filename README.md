@@ -157,6 +157,9 @@ Tools
   言葉 Flashcards flashcard files.  Each card's front is the unaltered
   Japanese text and its back is the text with kanji replaced by furigana
   wherever there are furigana annotations.
+* **Furigana Delimiter Adder**: This command line tool copies standard input
+  to standard output but adds a matching pair of furigana delimiters (the square
+  brackets '[' and ']') after each kanji character.
 
 Each tool is executed differently.  Please refer to each tool's README file
 for instructions.

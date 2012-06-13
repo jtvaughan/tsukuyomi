@@ -49,7 +49,7 @@ div.back {
 }
 
 div.source {
-  display: inline;
+  display: block;
   font-size: large;
   text-align: center;
 }

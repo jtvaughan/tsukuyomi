@@ -176,6 +176,8 @@ The _general_ section's settings are:
    try to link to downloaded 漢字 stroke order diagrams according to
    the settings within the specified configuration file; otherwise,
    it will link all stroke order diagrams to remote Internet sources.
+5. _name_ (optional): This attribute sets the deck's name.  If it is absent
+   or its value is empty, then the deck's name defaults to "Untitled".
 
 All paths in the configuration file are either absolute or relative to
 the directory containing the configuration file.
@@ -183,6 +185,7 @@ the directory containing the configuration file.
 Here is a sample configuration file:
 
 >     [general]
+>     name: 言葉のフラッシュカード
 >     flashcards-file: 日本語/言葉のフラッシュカード.txt
 >     port: 1337
 >     image-settings: image-downloader-settings.txt
