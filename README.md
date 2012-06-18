@@ -51,7 +51,7 @@ In keeping with these principles, 月詠 features the following:
    single-[session](http://en.wikipedia.org/wiki/Session_(computer_science\)),
    local [web applications](http://en.wikipedia.org/wiki/Web_application).
    In fact, they are only web applications because web browsers are perfect
-   front-ends for graphical applications.  In other words, is easy to
+   front-ends for graphical applications.  In other words, it is easy to
    design nice, functional UIs in
    [HTML5](http://en.wikipedia.org/wiki/HTML5),
    [CSS](http://en.wikipedia.org/wiki/CSS), and

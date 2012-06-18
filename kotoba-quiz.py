@@ -41,6 +41,9 @@ CurrentDeck = None
 CurrentSession = None
 DeckFactory = None
 DeckName = "Untitled"
+DefaultTime = ('', '', '')
+DefaultMaxDeckSize = ''
+DefaultMaxNewCards = ''
 FlashcardsFile = None
 FlashcardsStatsLog = None
 ImageSettings = None
@@ -64,7 +67,8 @@ def Config():
   CurrentSession = str(random.random())
   DeckFactory.Refresh()
   return DeckFactory.RenderConfigPage(DeckName + " -- Setup", CurrentSession, QuizURL,
-   image_settings=ImageSettings)
+   default_time=DefaultTime, default_max_deck_size=DefaultMaxDeckSize,
+   default_max_new_cards=DefaultMaxNewCards, image_settings=ImageSettings)
 
 @post(QuizURL)
 def HandlePost():
@@ -194,6 +198,9 @@ delays = [0]  # Bucket zero is implicitly defined.
 def ハンドラ(config, パス名, PrintErrorAndExit):
   global ポート
   global DeckName
+  global DefaultTime
+  global DefaultMaxDeckSize
+  global DefaultMaxNewCards
   global FlashcardsFile
   global FlashcardsStatsLog
   global ImageSettings
@@ -221,6 +228,18 @@ def ハンドラ(config, パス名, PrintErrorAndExit):
         ポート = int(port)
       except ValueError:
         PrintErrorAndExit("'port' has a non-numeric value: " + port)
+  if 'defaults' in config:
+    defaults = config['defaults']
+    if 'time' in defaults:
+      DefaultTime = list(x.strip() for x in defaults['time'].split(':'))
+      if len(DefaultTime) > 3:
+        PrintErrorAndExit("'time' has more than three components: " + defaults['time'])
+      while len(DefaultTime) < 3:
+        DefaultTime = [''] + DefaultTime
+    if 'max-deck-size' in defaults:
+      DefaultMaxDeckSize = defaults['max-deck-size']
+    if 'max-new-cards' in defaults:
+      DefaultMaxNewCards = defaults['max-new-cards']
   if 'delays' in config:
     for delay in config['delays']:
       try:

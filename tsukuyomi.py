@@ -1242,6 +1242,9 @@ class TCardDeckFactory(object):
     title,
     session_token,
     post_handler_url,
+    default_time=('', '', ''),
+    default_max_deck_size='',
+    default_max_new_cards='',
     image_settings=None
    ):
     """ Generate an HTML page that displays a deck configuration screen.
@@ -1254,6 +1257,14 @@ class TCardDeckFactory(object):
           post_handler_url :: str
             the absolute or relative URL of the script that will handle POST
             results sent from the client
+          default_time :: 3-tuple<str>
+            the initial values of the hours, minutes, and seconds fields
+            of the configuration form, respectively
+          default_max_deck_size :: str
+            the initial value of the input field for the maximum deck size
+          default_max_new_cards :: str
+            the initial value of the input field for the maximum number of
+            new cards
           image_settings :: TStrokeOrderDiagramFSInfo
             the stroke order diagram image manager for 漢字 stroke order
             diagram sources or None if the user should not be allowed to
@@ -1266,7 +1277,12 @@ class TCardDeckFactory(object):
       'num_cards_due': self.NumberOfDueCards,
       'num_new_cards': self.NumberOfNewCards,
       'num_cards_total': self.NumberOfCards,
-      'buckets': self.Buckets
+      'buckets': self.Buckets,
+      'time_hours': default_time[0],
+      'time_minutes': default_time[1],
+      'time_seconds': default_time[2],
+      'max_deck_size': default_max_deck_size,
+      'max_new_cards': default_max_new_cards
      }
 
     if image_settings is not None:

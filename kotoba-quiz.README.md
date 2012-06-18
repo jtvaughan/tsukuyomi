@@ -126,8 +126,8 @@ Configuration Files
 -------------------
 
 言葉 Flashcards expects the user to provide a special configuration file
-describing the server's properties.  The configuration file should contain
-two sections:
+describing the server's properties.  The configuration file may contain
+three sections:
 
 1. _general_: This section contains general settings.
 2. _delays_ (optional): This section contains the delays (in days) associated
@@ -155,29 +155,45 @@ two sections:
    In this example, the Leitner buckets' delays in increasing order by
    Leitner bucket number are 0, 1, 3, 14, 30, 90, and 180 days.  There
    are seven buckets in this example.
+3. _defaults_ (optional): This section contains default settings for the
+   deck configuration page.
 
 The _general_ section's settings are:
 
-1. _flashcards-file_ (required): This attribute specifies the
+1. _flashcards-file_ (required): This setting specifies the
    path to a configuration file containing 言葉 flashcards.
    (See the Flashcard Files section for more information.)
-2. _stats-log_ (optional): This attribute specifies the path to the log file to
+2. _stats-log_ (optional): This setting specifies the path to the log file to
    which the server will append performance data.  (See the Stats Log Files
    section for more information.)
-3. _port_ (optional): This attribute specifies the server's port number.
+3. _port_ (optional): This setting specifies the server's port number.
    Port numbers must be integers between 1 and 65535, inclusive.  If this
-   attribute is absent, then the user will have to specify the port
+   setting is absent, then the user will have to specify the port
    via the command-line `ポート番号` option.  (See the Running section
    above for more information.)
-4. _image-settings_ (optional): This attribute specifies a path to
+4. _image-settings_ (optional): This setting specifies a path to
    a 漢字 Stroke Order Diagram Downloader configuration file.  (See the
    README file for the 漢字 Stroke Order Diagram Downloader for more
-   information.)  If this attribute is present, 言葉 Flashcards will
+   information.)  If this setting is present, 言葉 Flashcards will
    try to link to downloaded 漢字 stroke order diagrams according to
    the settings within the specified configuration file; otherwise,
    it will link all stroke order diagrams to remote Internet sources.
 5. _name_ (optional): This attribute sets the deck's name.  If it is absent
    or its value is empty, then the deck's name defaults to "Untitled".
+
+The _defaults_ section's settings are:
+
+1. _time_ (optional): This setting specifies the default time for quizzes.
+   It may contain at most three colon-separated components: hours, minutes,
+   and seconds.  The components may be blank.  For example, `::` specifies
+   three blank fields, both `10:0` and `10:` specify exactly ten minutes
+   (though the first makes the seconds field zero and the second makes it
+   blank), and `2:45:30` specifies exactly two hours, forty-five minutes,
+   thirty seconds.
+2. _max-deck-size_ (optional): This setting specifies the default value
+   for the "max deck size" field in the deck configuration page.
+3. _max-new-cards_ (optional): This setting specifies the default value
+   for the "max new cards" field in the deck configuration page.
 
 All paths in the configuration file are either absolute or relative to
 the directory containing the configuration file.
@@ -190,6 +206,10 @@ Here is a sample configuration file:
 >     port: 1337
 >     image-settings: image-downloader-settings.txt
 >     
+>     [defaults]
+>     time: 10:
+>     max-deck-size: 40
+>
 >     [delays]
 >     4
 >     16

@@ -19,6 +19,20 @@
       the total number of cards in the deck
     buckets :: [TLeitnerBucket]
       the array of Leitner buckets
+    time_hours :: str
+      the default value of the input field for the number of hours allocated
+      for the quiz
+    time_minutes :: str
+      the default value of the input field for the number of minutes allocated
+      for the quiz
+    time_seconds :: str
+      the default value of the input field for the number of seconds allocated
+      for the quiz
+    max_deck_size :: str
+      the default value of the input field for the maximum deck size (in cards)
+    max_new_cards :: str
+      the default value of the input field for the maximum number of new cards
+      to put in the deck
     fieldsets :: set<dict>
       a set of additional field sets for the configuration form in which each
       element contains two key-value pairs:
@@ -63,17 +77,17 @@
           <table>
             <tr>
               <th style="text-align:right"><label>Time:</label></th>
-              <td><input type="text" id="時" name="hours" pattern="[0-9]*" /></td>
+              <td><input type="text" id="時" name="hours" pattern="[0-9]*" value="{{ time_hours }}"/></td>
               <td><label for="時">時</label></td>
             </tr>
             <tr>
               <td></td>
-              <td><input type="text" id="分" name="minutes" pattern="[0-9]*" /></td>
+              <td><input type="text" id="分" name="minutes" pattern="[0-9]*" value="{{ time_minutes }}" /></td>
               <td><label for="分">分</label></td>
             </tr>
             <tr>
               <td></td>
-              <td><input type="text" id="秒" name="seconds" pattern="[0-9]*" /></td>
+              <td><input type="text" id="秒" name="seconds" pattern="[0-9]*" value="{{ time_seconds }}" /></td>
               <td><label for="秒">秒</label></td>
             </tr>
           </table>
@@ -82,11 +96,11 @@
           <table>
             <tr>
               <th style="text-align:right"><label>Max deck size:</label></th>
-              <td><input type="text" name="size" pattern="[0-9]*" title="the maximum number of due cards to show or the maximum deck size if no cards are due"/></td>
+              <td><input type="text" name="size" pattern="[0-9]*" title="the maximum number of due cards to show or the maximum deck size if no cards are due" value="{{ max_deck_size }}"/></td>
             </tr>
             <tr>
               <th style="text-align:right"><label>Max new cards:</label></th>
-              <td><input type="text" name="num_new_cards" pattern="[0-9]*" title="the maximum number of new cards to show" /></td>
+              <td><input type="text" name="num_new_cards" pattern="[0-9]*" title="the maximum number of new cards to show" value="{{ max_new_cards }}" /></td>
             </tr>
           </table>
         </p>
